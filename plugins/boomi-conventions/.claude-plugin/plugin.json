@@ -1,0 +1,10 @@
+{
+  "name": "boomi-conventions",
+  "description": "Coding conventions for Boomi components: property prefixes (PP_, D_) and process name prefixes ([S], [UT])",
+  "version": "0.1.0",
+  "author": {
+    "name": "Simone Avogadro"
+  },
+  "license": "CC-BY-SA-4.0",
+  "keywords": ["boomi", "conventions", "naming"]
+}

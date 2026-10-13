@@ -1,0 +1,21 @@
+{
+  "name": "boomi-skills",
+  "owner": {
+    "name": "Simone Avogadro"
+  },
+  "metadata": {
+    "description": "Skills for Boomi development: coding conventions and unit testing (database mocked with mockjdbc)"
+  },
+  "plugins": [
+    {
+      "name": "boomi-conventions",
+      "description": "Coding conventions for Boomi components: property prefixes (PP_, D_) and process name prefixes ([S], [UT])",
+      "source": "./plugins/boomi-conventions"
+    },
+    {
+      "name": "boomi-unit-testing",
+      "description": "Unit testing Boomi processes inside Boomi: [UT] test processes, database mocked with mockjdbc, assertions on the expected DB writes",
+      "source": "./plugins/boomi-unit-testing"
+    }
+  ]
+}
