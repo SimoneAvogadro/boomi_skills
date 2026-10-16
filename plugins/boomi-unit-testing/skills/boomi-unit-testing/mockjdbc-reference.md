@@ -104,7 +104,8 @@ The connector reads the metadata (`getColumns`) before running operations it bui
   `order_id|integer,customer_id,segment,amount|double` (types make numbers bound as numbers);
 - **every field of the input document must be a column of that header**, otherwise NullPointerException.
 
-Overrides: the legacy connector needs Driver Type `Custom`, Class Name and Connection URL; Database V2 has no
+Overrides: the legacy connector always needs all three, Driver Type `Custom`, Class Name and Connection URL (never
+only Class Name and URL, see SKILL.md); Database V2 has no
 driver type, only `className` and `url`. Take the `xpath` of each override from a process where the override was
 configured in the GUI and pulled (Companion `process_extensions.md`).
 

@@ -77,9 +77,13 @@ Start (No Data)
 
 User name and password stay those of the real connection: mockjdbc ignores them.
 
-1. In the `[UT]` process Extensions → Connection Settings: make these fields of the `[S]`'s DB connection
-   extensible. Extensions are declared on the process that is deployed and run (the `[UT]`) and apply to the
-   connections of the subprocesses it calls. Declare them in the GUI or start from a pulled process that has them: each override needs its
+1. In the `[UT]` process Extensions → Connection Settings: make **all** these fields of the `[S]`'s DB connection
+   extensible, always: with the legacy connector **Driver Type, Class Name and Connection URL**, even when the
+   connection already uses `Custom`. Only the `Custom` driver type uses the Class Name: a connection with a
+   predefined type (SQL Server, Oracle, ...) ignores the mockjdbc class, and the test would reach the real driver.
+   A `[UT]` without the Driver Type extension works only by chance and breaks when the connection changes type.
+   Extensions are declared on the process that is deployed and run (the `[UT]`) and apply to the connections of the
+   subprocesses it calls. Declare them in the GUI or start from a pulled process that has them: each override needs its
    connector-specific `xpath`, otherwise it is silently ignored (Companion error reference, Issue #31).
 2. **mockjdbc Custom Library**: before the first test on an environment, check (Companion scripts) that
    - `boomi-component-search.sh --type customlibrary` + `boomi-component-pull.sh` finds a library with
@@ -98,8 +102,15 @@ User name and password stay those of the real connection: mockjdbc ignores them.
    - **GUI**: Test → Test Extensions → Connection Settings → untick "Use connection component value" for those
      fields and enter the values above.
    - **Automated** (Companion scripts): deploy the `[UT]` to a **dedicated test environment**, set the values as
-     Environment Extensions there (`boomi-extensions.sh`), run `boomi-test-execute.sh --process-id <[UT] id>`; the
-     test passed if the status is `COMPLETE`, failed if `ERROR` (the Exception message says why).
+     Environment Extensions there (`boomi-extensions.sh`, legacy Driver Type value `custom`), run
+     `boomi-test-execute.sh --process-id <[UT] id>`; the test passed if the status is `COMPLETE`, failed if `ERROR`
+     (the Exception message says why).
+   - **After every `set`, `get` again**: each of the three fields must show the value with `useDefault: false`. The
+     platform can accept a `set` and keep the default without any error (seen with Driver Type on a field added to
+     the declarations by a redeploy; once saved in the GUI, later API writes work). A field still at
+     `useDefault: true`: **stop**, ask the user to set it once in Manage → Environment Extensions of the test
+     environment (untick "Use connection component value"), then `get` again before running the test. Running
+     with a field at its default can reach the real driver.
 4. Never set the mockjdbc values on an environment where real processes run.
 
 ## Quick reference
