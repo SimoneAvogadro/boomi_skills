@@ -1,6 +1,6 @@
 # mockjdbc reference for Boomi tests
 
-Source: https://github.com/SimoneAvogadro/dummyjdbc (README, TUTORIAL.md, FEATURES.md section 11). Written for
+Source: https://github.com/SimoneAvogadro/mockjdbc (README, TUTORIAL.md, FEATURES.md section 11). Written for
 mockjdbc 2.0.x; check the CHANGELOG of the repository when a newer version is installed.
 
 ## Contents
@@ -15,18 +15,18 @@ mockjdbc 2.0.x; check the CHANGELOG of the repository when a newer version is in
 
 ## Installation on the runtime
 
-Upload to a Custom Library deployed on the test runtime (Atom, Molecule...), library type *Connector* with the
-connector type of the connection under test (*Database* for the legacy connector, *Database V2*):
+Manual setup (download, upload to Account Libraries, Custom Library component, deployment):
+https://github.com/SimoneAvogadro/mockjdbc/blob/master/FEATURES.md#setting-up-the-custom-library. Identifiers the
+agent needs:
 
-- `mockjdbc-<version>.jar` (releases of the repository, or `mvn package`; Java 8 bytecode);
-- `net.sf.opencsv:opencsv` 2.3;
-- `org.aspectj:aspectjrt` 1.9.22.1 (the driver classes do not load without it);
-- `slf4j-api` is already provided by the Boomi runtime.
-
-Driver class `me.avogadro.mockjdbc.MockJdbcDriver`, JDBC URL `any` (or `jdbc::mock::<dir>` for a directory of CSV
-files). No Boomi-specific configuration: the driver detects the Boomi runtime (`com.boomi.execution.ExecutionUtil`)
-and then reads and writes Dynamic Process Properties. At startup the container log shows
-`MockJDBC <version> registered in DriverManager: false`.
+- Custom Library XML (`type="customlibrary"`): `<Type>connector</Type>`, `<connectorType>` `database` (Database
+  Legacy) or `officialboomi-X3979C-dbv2da-prod` (Database V2), one library per connector; `Files` entries
+  `mockjdbc-<version>.jar`, `opencsv-2.3.jar`, `aspectjrt-1.9.22.1.jar` (the driver classes do not load without it);
+  `slf4j-api` is provided by the Boomi runtime.
+- Deployed to the test environment only; after the deployment the jars are in `/userlib/<connector type>` of the runtime.
+- Driver class `me.avogadro.mockjdbc.MockJdbcDriver`, JDBC URL `any` (or `jdbc::mock::<dir>` for a directory of CSV
+  files). The driver detects Boomi (`com.boomi.execution.ExecutionUtil`) and then reads and writes Dynamic Process
+  Properties. Container log at startup: `MockJDBC <version> registered in DriverManager: false`.
 
 **Upgrade**: stop the Atom, delete the old mockjdbc jars (and old data jars of the same library), start the Atom.
 Needed with both connectors: with Database V2 Windows keeps the old jars locked; with the legacy connector

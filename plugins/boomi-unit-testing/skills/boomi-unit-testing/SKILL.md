@@ -12,7 +12,7 @@ A unit test is a **separate `[UT]` process** that prepares the data, calls the `
 the check fails. The test passes when the execution completes, fails when it ends in error: no one has to read the
 logs.
 
-The database is replaced by **mockjdbc** (https://github.com/SimoneAvogadro/dummyjdbc), a JDBC driver that
+The database is replaced by **mockjdbc** (https://github.com/SimoneAvogadro/mockjdbc), a JDBC driver that
 answers queries with CSV data taken from Dynamic Process Properties and records the parameters of every INSERT,
 UPDATE, DELETE and stored procedure call in other Dynamic Process Properties. The switch to mockjdbc happens only in
 the test run, through **extensions** of the database connection: the process and its connection keep pointing to
@@ -81,15 +81,26 @@ User name and password stay those of the real connection: mockjdbc ignores them.
    extensible. Extensions are declared on the process that is deployed and run (the `[UT]`) and apply to the
    connections of the subprocesses it calls. Declare them in the GUI or start from a pulled process that has them: each override needs its
    connector-specific `xpath`, otherwise it is silently ignored (Companion error reference, Issue #31).
-2. Run it:
+2. **mockjdbc Custom Library**: before the first test on an environment, check (Companion scripts) that
+   - `boomi-component-search.sh --type customlibrary` + `boomi-component-pull.sh` finds a library with
+     `<Type>connector</Type>`, the `<connectorType>` of the `[S]`'s connection (`database` = Database Legacy,
+     `officialboomi-X3979C-dbv2da-prod` = Database V2) and `Files` `mockjdbc-*.jar`, `opencsv-*.jar`, `aspectjrt-*.jar`;
+   - it is deployed on the test environment: `POST DeployedPackage/query` with `environmentId`, `componentId` of
+     the library, `active` = `true` (the lookup of `boomi-undeploy.sh --by-component`; no read-only script).
+
+   No such library: **stop**. Tell the user that uploading the jars and creating the library are manual (Boomi has
+   no API to upload jars), point to
+   https://github.com/SimoneAvogadro/mockjdbc/blob/master/FEATURES.md#setting-up-the-custom-library and wait for
+   their confirmation; never upload jars or create the library yourself. After the confirmation check again.
+   Library found but not deployed there: `boomi-deploy.sh <pulled library XML>` (to `BOOMI_ENVIRONMENT_ID`, the test
+   environment), then go on.
+3. Run it:
    - **GUI**: Test → Test Extensions → Connection Settings → untick "Use connection component value" for those
      fields and enter the values above.
    - **Automated** (Companion scripts): deploy the `[UT]` to a **dedicated test environment**, set the values as
      Environment Extensions there (`boomi-extensions.sh`), run `boomi-test-execute.sh --process-id <[UT] id>`; the
      test passed if the status is `COMPLETE`, failed if `ERROR` (the Exception message says why).
-3. Never set the mockjdbc values on an environment where real processes run.
-
-Prerequisite: the mockjdbc jar and its dependencies in a Custom Library deployed on the runtime (see reference).
+4. Never set the mockjdbc values on an environment where real processes run.
 
 ## Quick reference
 
