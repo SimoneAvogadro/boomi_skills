@@ -63,7 +63,7 @@ Companion patterns translate directly: `DPP_FROM_WRAPPER` becomes `PP_FROM_WRAPP
 ## Names you do not rename
 
 - Names fixed by something outside your component keep their spelling: properties read by a library or driver
-  (e.g. mockjdbc reads `mockjdbc_<table>` and writes `mockjdbc_<table>_params`), Boomi built-in properties
+  (e.g. mockjdbc reads `mockjdbc_<query id or table>` and writes `mockjdbc_<query id or table>_params`), Boomi built-in properties
   (`meta.*`, `connector.*`, `mime.*`), names agreed with another team.
 - Existing components pulled from the account: new properties follow the convention; rename existing `DPP_` / `DDP_`
   properties only when asked, and then in every component that reads or writes them (a property name is a string,

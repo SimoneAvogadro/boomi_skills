@@ -1,7 +1,7 @@
 # mockjdbc reference for Boomi tests
 
 Source: https://github.com/SimoneAvogadro/mockjdbc (README, TUTORIAL.md, FEATURES.md section 11). Written for
-mockjdbc 2.0.x; check the CHANGELOG of the repository when a newer version is installed.
+mockjdbc 2.1.x; check the CHANGELOG of the repository when a newer version is installed.
 
 ## Contents
 - Installation on the runtime
@@ -37,7 +37,9 @@ Needed with both connectors: with Database V2 Windows keeps the old jars locked;
 Resource name, in order of priority:
 
 1. step resource (`mockjdbc_##step0`, `##step1`...: the n-th statement of the execution, whatever its SQL);
-2. `-- TESTCASE: <name>` as the **first line** of the SQL (wins over the table name);
+2. `-- QUERY_ID: <id>` as the **first line** of the SQL (wins over the table name; mockjdbc 2.1.0+). The ID is one
+   word: empty, or with spaces, `?`, `#` or `,` → `SQLException`. The older `-- TESTCASE: <name>` works the same,
+   without checks;
 3. table name after `FROM`;
 4. stored procedure after `EXEC`, `EXECUTE`, `CALL`, `{call ...}`, `{? = call ...}`;
 5. `SELECT` without `FROM` → one row with value `1`;
@@ -52,7 +54,8 @@ step also checks the Dynamic Process Property `mockjdbc_<lookup>` (first as writ
 | `SELECT ... FROM customers` | `mockjdbc_customers` |
 | same, second time in the execution | `mockjdbc_customers#2`, else `mockjdbc_customers` |
 | `SELECT ... WHERE id = ?` with `C42` bound | `mockjdbc_customers?c42`... then `mockjdbc_customers` |
-| `-- TESTCASE: t_014a` + any SQL | `mockjdbc_t_014a` |
+| `-- QUERY_ID: ecommerce.orders-ws.select-customer` + any SQL | `mockjdbc_ecommerce.orders-ws.select-customer` |
+| same, `C42` bound | `mockjdbc_ecommerce.orders-ws.select-customer?c42`, then without `?c42` |
 | `EXEC get_rate ?` | `mockjdbc_get_rate` |
 
 Parameters in the `?params` key are rendered with `toString()`, dates with the formats below, joined with `,`.
@@ -69,15 +72,16 @@ Every prepared statement **except SELECT** stores its parameters as a comma-sepa
 | `INSERT INTO orders (...) VALUES (?, ?)` | `mockjdbc_orders_params` |
 | `UPDATE orders SET ...` / `DELETE FROM orders ...` | `mockjdbc_orders_params` |
 | `EXEC upd_status ?, ?` / `{call upd_status(?, ?)}` | `mockjdbc_upd_status_params` |
-| `-- TESTCASE: t_014a` + any statement but a SELECT | `mockjdbc_t_014a_params` |
+| `-- QUERY_ID: ecommerce.orders-ws.insert-order` + any statement but a SELECT | `mockjdbc_ecommerce.orders-ws.insert-order_params` |
 | statement on a step resource | `mockjdbc_##step<n>_params` |
 
 - `_params` holds the **last** write; each write is also in `_params#1`, `_params#2`... (counter shared with the
-  queries on the same name: a SELECT on `orders` then an INSERT into `orders` is occurrence 1 then 2).
+  queries on the same name: a SELECT on `orders` then an INSERT into `orders` is occurrence 1 then 2; with a
+  QUERY_ID on each statement every query has its own counter).
 - Batches: one capture per parameter set.
 - A parameter not set is left empty (`,a`).
 - The table name after `INSERT INTO` / `UPDATE` / `DELETE FROM` is matched with **letters only**: `order_lines` or
-  `t2` are not captured by name. Use a `-- TESTCASE:` comment for them (in the operation's SQL).
+  `t2` are not captured by name. Use a `-- QUERY_ID:` comment for them (in the operation's SQL).
 - SELECT parameters are never captured: assert them indirectly (mock only `customers?c42`; a wrong parameter gives no
   rows and a later assertion fails).
 - `executeUpdate` returns 1 when the table is recognised, 0 otherwise. No generated keys (empty result set).
@@ -100,7 +104,8 @@ Every prepared statement **except SELECT** stores its parameters as a comma-sepa
 The connector reads the metadata (`getColumns`) before running operations it builds from a table definition
 (Standard Get/Insert/Update/Delete, Dynamic Get/Insert...):
 
-- **define every table the operation writes to or filters on**, even header only, e.g. `mockjdbc_orders` =
+- **define every table the operation writes to or filters on**, even header only, by **table name** (also when
+  the statement has a QUERY_ID: the metadata is read by table), e.g. `mockjdbc_orders` =
   `order_id|integer,customer_id,segment,amount|double` (types make numbers bound as numbers);
 - **every field of the input document must be a column of that header**, otherwise NullPointerException.
 
@@ -134,11 +139,13 @@ Inside Boomi the driver is not registered in `DriverManager`: from a script use
 
 | Symptom | Cause / fix |
 |---|---|
-| Query returns no rows | property name not `mockjdbc_` + lower-case table; arrange path not run before the act path; CSV with `;` |
-| `_params` empty | statement is a SELECT; table name with digits/underscore (use `-- TESTCASE:`); wrong name case in the Decision (use lower case) |
+| Query returns no rows | the SQL has a `QUERY_ID` and the mock uses the table name (or the reverse); property name not `mockjdbc_` + lower-case table; arrange path not run before the act path; CSV with `;` |
+| `_params` empty | statement is a SELECT; the SQL has a `QUERY_ID` (read `mockjdbc_<id>_params`); table name with digits/underscore (use `-- QUERY_ID:`); wrong name case in the Decision (use lower case) |
 | Real database contacted / connection error | extensions not applied: field not extensible, override without `xpath`, Test Extensions not filled, wrong environment |
 | `ClassNotFoundException` for the driver | Custom Library not deployed on that runtime, or `aspectjrt` / `opencsv` missing |
 | Old behaviour after an upgrade | old jar still loaded: stop Atom, delete old jars, restart |
 | NullPointerException in Database V2 | table header missing, or input field not in the header |
 | `NumberFormatException` / date parse error | value does not match the getter: see CSV format |
+| `SQLException: Invalid QUERY_ID` | ID with spaces, `?`, `#` or `,`, or empty: one word, e.g. `ecommerce.orders-ws.insert-order` |
+| `-- QUERY_ID:` ignored | not on the first line, or jar older than 2.1.0 (check `mockjdbc-<version>.jar` in the Custom Library) |
 | `UnsupportedOperationException` | JDBC method not implemented by mockjdbc: report it on the repository |
