@@ -84,8 +84,9 @@ call):
    for the confirmation. After it, the agent pulls the process again, checks the change, and only then goes on.
 3. **No, the agent uses an alternative** that leaves the `[S]` as it is (the connector skill says which).
 
-Put the trade-off in the question. For a mock, the connector skill says when option 3 is the one to mark
-**(Recommended)**; for a defect, option 3 means leaving the `[UT]` red, which documents the defect.
+Put the trade-off in the question. For a mock, the connector skill says which option to recommend, and when an
+alternative without changes is good enough to skip the question and only inform the user; for a defect, option 3
+means leaving the `[UT]` red, which documents the defect.
 
 ## Connector skills: what each one provides
 

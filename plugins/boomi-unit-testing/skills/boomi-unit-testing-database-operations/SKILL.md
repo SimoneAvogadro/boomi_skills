@@ -79,7 +79,11 @@ that SQL starts with `-- QUERY_ID:` or `-- TESTCASE:` (both count as an ID).
   `Insert into payments(pay_id,amount) values (?,?)`: no schema, even with `schemaName` set, and no quotes, so the
   table-name key works. Database V2 Standard Get/Insert/Update/Delete and Update Commit By Rows keep their SQL in the
   operation: they get the question.
-- **Every other operation**: ask the QUERY_ID question.
+- **Covered by key 1 or key 2** (table name, or table name + bound values, below): no question. Use that key and
+  tell the user in two words that the QUERY_ID can be avoided: the processes stay untouched, but the tests are less
+  structured (they depend on table names and bound values, not on a name given to each query); IDs can be added later
+  if the user wants them.
+- **Every other operation** (it would need key 3 or 4): ask the QUERY_ID question.
 
 Also note the connection of each operation: a connection shared with other projects (for example in a `#common`
 folder) is more likely to be deployed in other processes of the unit-test environment, and a QUERY_ID on an operation
@@ -92,15 +96,15 @@ against the real database: when the `[S]` sends a wider document, a `[UT]` that 
 
 ## The QUERY_ID question
 
-This is the question of `boomi-unit-testing` ("When a mock needs a change in the `[S]`") for the database: for each
-of these operations, propose an ID and ask which of the three options applies. Option 1 adds
-`-- QUERY_ID: <id>` as the **first line** of the SQL; option 3 uses the mock keys below.
+This is the question of `boomi-unit-testing` ("When the `[S]` must change") for the database, asked for the operations
+that keys 1 and 2 do not cover: propose an ID and ask which of the three options applies. Option 1 adds
+`-- QUERY_ID: <id>` as the **first line** of the SQL; option 3 uses an order-dependent key (3 or 4, below).
 
 Trade-off to put in the question: the QUERY_ID is a comment on the first line, the real database ignores it and the
 process behaves the same in production, and the test gets a key that depends neither on the SQL text nor on the order
-of the statements. Option 3 keeps the `[S]` exactly as it is in production, with nothing to push or redeploy. Mark
-option 3 **(Recommended)** when key 1 or key 2 below covers the operation; otherwise recommend option 1 and say why
-(for example: a write on a temporary table `#tmp` is not captured by name and would need a step key).
+of the statements. Option 3 keeps the `[S]` exactly as it is in production, with nothing to push or redeploy, but the
+test breaks when the statements are reordered. Recommend option 1 and say why (for example: a write on a temporary
+table `#tmp` is not captured by name and would need a step key).
 
 **ID names**: `<project>.<service>.<step>`, grouped by project, then by service / flow / interface, then a meaningful
 name for the step: `ecommerce.create-order-ws.select-customer`, `ecommerce.create-order-ws.insert-order`. One word of
