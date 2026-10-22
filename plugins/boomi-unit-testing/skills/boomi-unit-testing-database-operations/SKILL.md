@@ -25,7 +25,9 @@ The extensions to set (on the database connection the `[S]` uses, in the `[UT]` 
 With the Legacy connector extend **all three**, also when the connection already uses `Custom`: only the `Custom`
 driver type uses the Class Name, so a connection with a predefined type (SQL Server, Oracle, ...) would ignore the
 mockjdbc class and reach the real driver, and a `[UT]` without the Driver Type extension breaks the day the connection
-changes type. User name and password stay those of the real connection: mockjdbc ignores them.
+changes type. User name and password stay those of the real connection: mockjdbc ignores them. The
+`ConnectionOverride` blocks to copy into the `[UT]` (Legacy with `xpath`, Database V2 without) are in
+[mockjdbc-reference.md](mockjdbc-reference.md#extension-declarations).
 
 **REQUIRED:** `boomi-unit-testing` for the strategy this skill plugs into: the `[UT]` process, the question before any
 change to the `[S]`, how extensions are declared, set and checked, the unit-test environment and the cleanup.
@@ -52,6 +54,16 @@ and wait for their confirmation; never upload jars or create the library yoursel
 again. Library found but not deployed there: `boomi-deploy.sh <pulled library XML>` (to the unit-test environment),
 then go on; it is part of the cleanup of `boomi-unit-testing`.
 
+**The library is not what the runtime runs.** After an upgrade of the library the runtime can keep loading the old
+jar (jar locking: the old file stays in `userlib` and on the classpath until the runtime is stopped and the file
+removed). Suspect it when the driver behaves like an older version: a schema-qualified write not captured under
+`mockjdbc_<schema>.<table>_params`, a "Stored Procedure" operation failing in `prepareCall`, a `-- QUERY_ID:` ignored.
+Then check it (a temporary Notify that logs the expected `_params` key and its neighbours, or an existing test of
+that feature run on the same runtime) and **ask the user how to go on**. On a local Atom the user can stop it, delete
+the old jars and start it again. **Cloud runtimes and Atoms cannot be restarted and their jars cannot be deleted**:
+there the choice is another runtime, or keys that work with the behaviour the runtime has (a QUERY_ID, options 1 or
+2; a step key, key 4).
+
 ## Inventory of the database operations
 
 Before writing the `[UT]`, list every database operation that the `[S]` runs, and those of the subprocesses it calls:
@@ -68,6 +80,15 @@ that SQL starts with `-- QUERY_ID:` or `-- TESTCASE:` (both count as an ID).
   table-name key works. Database V2 Standard Get/Insert/Update/Delete and Update Commit By Rows keep their SQL in the
   operation: they get the question.
 - **Every other operation**: ask the QUERY_ID question.
+
+Also note the connection of each operation: a connection shared with other projects (for example in a `#common`
+folder) is more likely to be deployed in other processes of the unit-test environment, and a QUERY_ID on an operation
+shared with them changes their SQL too.
+
+**Database V2 Standard Get**: its input document must hold only the `$` parameters of the query. With other fields
+the connector returns one empty document and no rows, without an error (Companion, Database V2 references), also
+against the real database: when the `[S]` sends a wider document, a `[UT]` that checks the rows finds a defect of the
+`[S]`.
 
 ## The QUERY_ID question
 
@@ -125,7 +146,10 @@ Choose the key in this order:
    When `mockjdbc_##stepN` is defined, that statement uses it before any QUERY_ID or table name: rows for a read, the
    update count (`1`) for a write, whose parameters are then in `mockjdbc_##stepN_params` (no `#n`). It breaks when
    any statement before it is added, removed or moved, and the count depends on how the connector creates its
-   statements: confirm N with a first run.
+   statements: confirm N with a first run. Set `mockjdbc_##stepN` = `1` for the guessed N and log
+   `mockjdbc_##step0_params`, `##step1_params`, ... with a temporary Notify: only the step of a write has parameters.
+   A wrong N on a read takes over its data (the CSV `1` is a header without rows: the SELECT returns no rows), so
+   check the reads too.
 
 With keys 3 and 4 the `[UT]` says so in the label of the Set Properties or Decision shape (`order-dependent: step 2`),
 and the answer to the user says that the test must be reviewed when the order of the `[S]` changes.
@@ -194,6 +218,9 @@ The example uses the table-name keys (option 3, key 1). With a QUERY_ID the keys
   connector binds: a Double `250` is `250.0`, a date uses the mockjdbc date format (`17-May-12`). Same query run
   several times: check `mockjdbc_<key>_params#1`, `#2`, ...
 - Several scenarios in one `[UT]` need `mockjdbc#RESET` between them.
+- **`_params` empty**: the process log does not show which properties the driver wrote. Add a temporary Notify in
+  path 3 that logs every candidate key (`mockjdbc_<table>_params`, `mockjdbc_<schema>.<table>_params`, `#1`, the
+  QUERY_ID key, `mockjdbc_##stepN_params`), run once, read which one holds the value, and remove the Notify.
 
 ## Quick reference
 
@@ -235,4 +262,6 @@ date formats, Database V2 rules and troubleshooting: [mockjdbc-reference.md](moc
 | Write on `#tmp` / `@rows` / `[order details]`, keyed by table | not captured by name: `_params` stays empty | QUERY_ID (options 1 or 2), or step key 4 |
 | Database V2 *Stored Procedure* that returns rows, IN values asserted on `_params` | always empty: without a signature the connector calls it with no parameters | assert the rows and their use; with OUT parameters, a signature named after the profile fields |
 | Database V2 insert into a table without mock header | NullPointerException in the connector | define `mockjdbc_orders` with the header (types included) |
-| Old jar still on the runtime | old behaviour | stop the Atom, delete old jars, restart |
+| Old jar still on the runtime after a library upgrade | older driver behaviour (schema writes not captured, `prepareCall` failing) | check it, then ask the user: local Atom stop, delete old jars, start; cloud runtime (no restart, no delete): another runtime, a QUERY_ID or a step key |
+| Database V2 Standard Get fed with the whole input document | one empty document, no rows, no error | the input holds only the `$` parameters of the query |
+| Wrong N for `mockjdbc_##stepN` | a read returns no rows, or the write is not captured | confirm N with a first run (Notify on `##step0_params`, `##step1_params`...) |

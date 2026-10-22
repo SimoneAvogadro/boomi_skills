@@ -9,6 +9,7 @@ mockjdbc 2.2.x; check the CHANGELOG of the repository when a newer version is in
 - Captured parameters (assertions)
 - CSV format
 - Database V2 connector
+- Extension declarations
 - Counters and several scenarios
 - Scripts
 - Troubleshooting
@@ -131,9 +132,40 @@ The connector reads the metadata (`getColumns`) before running operations it bui
   after the profile fields and type them.
 
 Overrides: the legacy connector always needs all three, Driver Type `Custom`, Class Name and Connection URL (never
-only Class Name and URL, see SKILL.md); Database V2 has no
-driver type, only `className` and `url`. Take the `xpath` of each override from a process where the override was
-configured in the GUI and pulled (Companion `process_extensions.md`).
+only Class Name and URL, see SKILL.md); Database V2 has no driver type, only `className` and `url`. The blocks to
+declare them are below.
+
+## Extension declarations
+
+Put the block in `<bns:processOverrides><Overrides xmlns=""><Connections>` of the `[UT]`, with the `id` of the
+`[S]`'s connection; the other fields of the connection can be omitted or listed with `overrideable="false"`.
+Taken from processes declared in the GUI and pulled, and run with mockjdbc.
+
+**Database (Legacy)**: every field needs its `xpath`.
+
+```xml
+<ConnectionOverride id="<connection id>">
+  <field id="driverId" label="Driver Type" overrideable="true" xpath="DatabaseConnectionSettings/@driverId"/>
+  <field id="className" label="Class Name" overrideable="true" xpath="DatabaseConnectionSettings/@className"/>
+  <field id="urlFormat" label="Connection URL" overrideable="true" xpath="DatabaseConnectionSettings/@urlFormat"/>
+</ConnectionOverride>
+```
+
+Environment Extension values (`boomi-extensions.sh`): `driverId` = `custom`, `className` =
+`me.avogadro.mockjdbc.MockJdbcDriver`, `urlFormat` = `any`.
+
+**Database V2** (`GenericConnectionConfig`, Connector SDK): no `xpath`; the GUI writes the block this way and it works.
+
+```xml
+<ConnectionOverride id="<connection id>">
+  <field id="url" label="Connection URL" overrideable="true"/>
+  <field id="className" label="Class Name" overrideable="true"/>
+</ConnectionOverride>
+```
+
+Environment Extension values: `className` = `me.avogadro.mockjdbc.MockJdbcDriver`, `url` = `any`. The GUI also adds an
+`<Extensions><ObjectDefinitions>` section with one `objectDefinition` per table the operations use; it is not needed
+for the override.
 
 Values in `_params` are the `toString()` of the bound objects, so they depend on how the connector binds each
 field: with `amount|double` in the header the connector binds a Double and `250` is captured as `250.0`.
@@ -164,9 +196,9 @@ Inside Boomi the driver is not registered in `DriverManager`: from a script use
 | `_params` empty | statement is a SELECT; the SQL has a `QUERY_ID` (read `mockjdbc_<id>_params`); schema-qualified write read without the schema (`mockjdbc_dbo.orders_params`); `#tmp` / `@rows` / quoted name with spaces (use `-- QUERY_ID:`); Database V2 procedure without signature; wrong name case in the Decision (use lower case) |
 | Database V2 error 405 `Kindly select the IN clause check box ...` | query with `IN (...)`: enable the IN clause option of the operation (connector check, not the driver) |
 | `SQLException` reading a procedure parameter | the parameter is IN, or not in the signature header |
-| Real database contacted / connection error | extensions not applied: field not extensible, override without `xpath`, Test Extensions not filled, wrong environment |
+| Real database contacted / connection error | extensions not applied: field not extensible, Legacy override without `xpath`, Test Extensions not filled, wrong environment |
 | `ClassNotFoundException` for the driver | Custom Library not deployed on that runtime, or `aspectjrt` / `opencsv` missing |
-| Old behaviour after an upgrade | old jar still loaded: stop Atom, delete old jars, restart |
+| Old behaviour after an upgrade | old jar still loaded (jar locking): ask the user; local Atom: stop, delete old jars, start; cloud runtime: cannot be restarted nor its jars deleted (SKILL.md, "The library is not what the runtime runs") |
 | NullPointerException in Database V2 | table header missing, or input field not in the header |
 | `NumberFormatException` / date parse error | value does not match the getter: see CSV format |
 | `SQLException: Invalid QUERY_ID` | ID with spaces, `?`, `#` or `,`, or empty: one word, e.g. `ecommerce.orders-ws.insert-order` |

@@ -22,7 +22,7 @@ both.
 | Dynamic Process Property | prefix `PP_` | `PP_BATCH_ID` | `DPP_BATCH_ID` |
 | Dynamic Document Property | prefix `D_` | `D_CUSTOMER_SEGMENT` | `DDP_CUSTOMER_SEGMENT` |
 | Subprocess (called by a Process Call, passthrough start) | name starts with `[S] ` | `[S] Load customer orders` | `Load customer orders - Sub` |
-| Unit test process | name starts with `[UT] ` | `[UT] Load customer orders - inserts order` | `TEST Load customer orders` |
+| Unit test process | `[UT] ` + name of the tested process without its `[S] ` + ` - <scenario>` | `[UT] Load customer orders - inserts order` (tests `[S] Load customer orders`) | `TEST Load customer orders`, `[UT] [S] Load customer orders` |
 | Main / listener / scheduled process | no prefix | `Orders JMS listener` | |
 | Folder of unit tests | `Unit test`, inside the folder of the processes under test; `Unit test - <description>` if there are several in the same folder | `Orders/Unit test`, `Orders/Unit test - customers` | `Test`, `[UT] Tests`, a global `Tests` folder |
 

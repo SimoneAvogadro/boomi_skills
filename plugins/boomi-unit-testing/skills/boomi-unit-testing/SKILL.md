@@ -62,11 +62,20 @@ Given-When-Then in BDD): prepare the inputs and the mocks, run the code under te
 - Do not add a mock Message shape in the `[S]` main path, nor a test branch driven by a property (the Companion
   "temporary Message" and `DPP_FROM_WRAPPER` patterns): test code inside the `[S]` is forgotten and reaches production.
 
-## When a mock needs a change in the `[S]`
+## When the `[S]` must change
 
-A connector skill can find that a better test needs a small change in the `[S]` (for the database: a `-- QUERY_ID:`
-comment in the SQL). Never make it on your own: propose it (what, where, the value) and ask the user with
-AskUserQuestion, one question per change or one per group (up to four per call):
+Two cases lead to a change in the `[S]`:
+
+- **A mock needs it**: a connector skill finds that a better test needs a small change (for the database: a
+  `-- QUERY_ID:` comment in the SQL).
+- **A test found a defect**: a `[UT]` fails and the cause is the `[S]`, not the test or the mock. Prove it first:
+  reproduce the failing step alone in a temporary experiment process (`[UT] Experiment - <what>`, same operation, same
+  mock, inputs that differ only in the suspected cause), and read what the Companion says about that connector. The
+  experiment process is part of the cleanup.
+
+Never make the change on your own: propose it (what, where, the value, and every component it adds or changes, such
+as a new profile) and ask the user with AskUserQuestion, one question per change or one per group (up to four per
+call):
 
 1. **Yes, the agent does it.** The agent changes the `[S]`, pushes it and deploys it **only to the unit-test
    environment**. It tells the user that the `[S]` changed and that deploying it where it runs (production and the
@@ -75,7 +84,8 @@ AskUserQuestion, one question per change or one per group (up to four per call):
    for the confirmation. After it, the agent pulls the process again, checks the change, and only then goes on.
 3. **No, the agent uses an alternative** that leaves the `[S]` as it is (the connector skill says which).
 
-Put the trade-off in the question. The connector skill says when option 3 is the one to mark **(Recommended)**.
+Put the trade-off in the question. For a mock, the connector skill says when option 3 is the one to mark
+**(Recommended)**; for a defect, option 3 means leaving the `[UT]` red, which documents the defect.
 
 ## Connector skills: what each one provides
 
@@ -92,7 +102,8 @@ A skill that mocks a connector gives, for that connector:
 ## The `[UT]` process
 
 Create it in a folder named `Unit test`, inside the folder of the process under test (`Unit test - <description>` if
-the folder has several groups of tests), named `[UT] <process under test> - <scenario>`.
+the folder has several groups of tests). The name is `[UT] ` + the name of the process under test **without** its
+`[S] ` prefix + ` - <scenario>`: `[S] Scarica fatture` → `[UT] Scarica fatture - fattura duplicata`.
 
 ```
 [UT] <process under test> - <scenario>
@@ -107,19 +118,29 @@ Start (No Data)
 
 - **Act**: the input document of the `[S]` comes from a Message shape in the `[UT]` (the execution API cannot inject
   documents). Call the `[S]` with a Process Call (`wait="true"`, `abort="true"`): it shares the Dynamic Process
-  Properties of the test.
+  Properties of the test. To get the documents the `[S]` returns, the Process Call lists its Return Documents shape
+  (`<returnpaths childShapeName="<shape name of the Return Documents in the [S]>"/>`, Companion
+  `references/steps/process_call_step.md`).
+- **Check that the response exists before reading it**: right after the Process Call, a Decision "response
+  returned?" ending in an Exception. Otherwise an empty or broken response makes the shape that reads its fields fail
+  in path 2 with a generic error, and the checks of path 3 never run.
 - **Assert**: one Decision per check. False → Exception (`stopsingledoc="false"`, so the whole execution ends in
-  ERROR) whose message shows expected and actual value (`{1}`). When unsure of the exact value, run the test once,
-  read the actual value in the Exception message, and set it as expected only after checking that it is right.
+  ERROR) whose message shows expected and actual value (`{1}`).
+- **Expected values on the first run**: the first Decision that fails hides the actual values of the later checks.
+  When the exact values are not known, add a temporary Notify at the start of path 3 that logs every value the
+  checks read, run once, check that the values are right, set them as expected, and remove the Notify.
 - One scenario per `[UT]` process is the default.
 
 ## Switch the connections (only for the test)
 
 1. In the `[UT]` process Extensions → Connection Settings: make extensible every field that the connector skill lists,
    always all of them. Extensions are declared on the process that is deployed and run (the `[UT]`) and apply to the
-   connections of the subprocesses it calls. Declare them in the GUI or start from a pulled process that has them:
-   each override needs its connector-specific `xpath`, otherwise it is silently ignored (Companion error reference,
-   Issue #31).
+   connections of the subprocesses it calls. Copy the `ConnectionOverride` block from the connector skill or from a
+   pulled process that has it. Connectors with their own settings (for example Database Legacy) need the `xpath` of
+   each field, otherwise the override is silently ignored (Companion error reference, Issue #31); connectors built on
+   the Connector SDK (`GenericConnectionConfig`, for example Database V2) have no `xpath`, and the block the GUI
+   writes is valid as it is. No block to copy: create the `[UT]`, ask the user to declare the fields once in the GUI
+   (process Extensions → Connection Settings → the connection → tick the fields → OK → Save), then pull it.
 2. Run it:
    - **GUI**: Test → Test Extensions → Connection Settings → untick "Use connection component value" for those
      fields and enter the test values.
@@ -151,6 +172,9 @@ deployed there that declares those fields extensible takes the environment value
 uses (for example the same environment for unit tests and for user acceptance tests, "collaudo"), switching a
 connection to a mock switches the other processes that use it as well. So, before the first deploy:
 
+Several of the calls below have no Companion script. Make them through `boomi_api` of the Companion's
+`scripts/boomi-common.sh` (`load_env`, `build_api_url`), **read-only** (queries and GETs); never write this way.
+
 1. **Candidates**: list the environments of the account (`POST Environment/query`) and keep those classified `TEST`
    with a runtime attached (`POST EnvironmentAtomAttachment/query`). A `PROD` environment is never a candidate.
 2. **Connections**: collect the connections the `[UT]` will override (those of the `[S]` and of the subprocesses it
@@ -165,8 +189,9 @@ connection to a mock switches the other processes that use it as well. So, befor
      get a CSV with one row per deployed connection and process: `ENVIRONMENT_ID`, `ENVIRONMENT_CLASS`,
      `CONTAINER_NAME`, `COMPONENT_ID` (the connection), `USED_IN_PROCESS_ID`, `USED_IN_PROCESS_NAME`. The connection
      is not in the CSV for that environment: no conflict. The first line of the CSV carries the report time, which
-     can be earlier than the latest deployments: for those, also check `POST DeployedPackage/query` on the
-     environment for packages deployed after that time.
+     can be earlier than the latest deployments: for those, list the packages deployed on the environment after that
+     time (`POST DeployedPackage/query`) and compare their `componentId`s with the processes that use the connection
+     (`boomi-component-search.sh --related-to <connection id>`).
 
    A candidate with neither is free; test values already set by earlier unit tests are not a conflict.
 4. **Choice**: show the user the candidates and what was found on each, and ask with AskUserQuestion which one to use
@@ -183,7 +208,7 @@ connection to a mock switches the other processes that use it as well. So, befor
    (`POST DeployedPackage/query` with `environmentId` and `active` = `true`, as in `boomi-undeploy.sh --by-component`)
    and keep the `componentId`s. What is in the baseline is never undeployed by the agent.
 2. **Track every deploy** the agent makes for the tests: `[UT]` processes, `[S]` deployed on their own, mock libraries
-   or components deployed by the agent, components made for an experiment.
+   or components deployed by the agent, experiment processes.
 3. **When the work is done** (all processes complete, all tests passing): undeploy what the agent deployed and is not
    in the baseline (`boomi-undeploy.sh --by-component <file>`; a component that only travels inside a process package
    has no deployment of its own). A baseline component that the agent redeployed with a new version stays deployed:
@@ -191,8 +216,14 @@ connection to a mock switches the other processes that use it as well. So, befor
 4. **Long chain of sessions**: when more development-test-improvement rounds are expected (open work, the user said
    so, the feature is only partly built), ask the user before undeploying: keep the test deployments for the next
    session, or remove them now. Kept deployments are listed in the final answer, so the next session can clean them.
-5. **Extension values stay**: the test values on the unit-test environment are not reverted (the next tests need
-   them), but the final answer of the session always lists them: environment, connection, fields and values.
+5. **Check**: query the active deployments of the environment again and compare them with the baseline.
+6. **Extension values stay**: the test values on the unit-test environment are not reverted (the next tests need
+   them).
+7. **Final answer of the session**, always:
+   - the extension values left: environment, connection, fields and values;
+   - every `[S]` changed, with its new version, and where the old version still runs (its release is the user's);
+   - the components to delete by hand (experiment processes): undeployed, but the scripts cannot delete components;
+   - the `[UT]`s that are order-dependent or left red, and why.
 
 ## Common mistakes
 
@@ -203,5 +234,8 @@ connection to a mock switches the other processes that use it as well. So, befor
 | Hand-written stub subprocesses that record what was "sent" | the connector step and its parameters are not tested | a mock behind the real connector (connector skill) |
 | A change to the `[S]` made for the test without asking | the test no longer runs the production process unchanged | the question with three options first |
 | Test "passes" by reading Notify output | needs a human, not repeatable | Decision + Exception |
-| Extension field without `xpath` | the real system is used | declare the override from the GUI / a pulled component |
+| Extension field without `xpath` on a connector with its own settings (Database Legacy...) | the real system is used | copy the block from the connector skill or a pulled component (SDK connectors such as Database V2 have no `xpath`: that is fine) |
 | Test values set on an environment shared with other processes | those processes switch to the mock too | choose the unit-test environment first (prerequisite) |
+| Fields of the `[S]` response read without checking it exists | path 2 fails with a generic error, path 3 never runs | Decision "response returned?" right after the Process Call |
+| A red `[UT]` "fixed" by changing the expected value | the defect of the `[S]` is hidden | prove the cause (experiment process), then the question with three options |
+| `[UT] [S] Scarica fatture - ...` | double prefix | `[UT] Scarica fatture - ...` |

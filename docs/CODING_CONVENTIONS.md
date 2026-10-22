@@ -35,7 +35,7 @@ The prefix is part of the name, so it appears wherever the name does: the proper
 | Kind of process | Name | Example |
 |---|---|---|
 | Subprocess: Data Passthrough start, called with a Process Call | `[S] ` + name | `[S] Load customer orders` |
-| Unit test process: exists only to test another process | `[UT] ` + name of the tested process + scenario | `[UT] Load customer orders - inserts order` |
+| Unit test process: exists only to test another process | `[UT] ` + name of the tested process without its `[S] ` prefix + scenario | `[UT] Load customer orders - inserts order` (tests `[S] Load customer orders`) |
 | Main process: listener, scheduled, started by hand | name without prefix | `Orders JMS listener` |
 
 **Why.** In the component explorer and in the Process Call picker the prefix separates what can be deployed and
