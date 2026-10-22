@@ -264,9 +264,21 @@ problem-solving guide).
 **Report and ask.** When level 2 is complete, report every defect of the defect list: `[S]`, failing `[UT]`, expected
 vs actual, cause, proposed fix and the components it touches. Then ask the user with AskUserQuestion:
 
-- **track them in a bug tracker?** (for example Jira, through the tools of the session): in which project, with which
-  issue type. Create the issues only after the yes: it is a write to an external system;
+- **track them in a bug tracker?** Only when the session has one: look first at the connectors and MCP servers
+  available (Jira, GitHub issues, Azure DevOps...). None: do not propose it, the defect list is the record. Create
+  nothing before the yes: it is a write to an external system;
 - **may the agent fix them?** all of them, some of them, or none (the `[UT]`s stay red and document them).
+
+**A project that already has a tracker**: before the first issue, interview the user (AskUserQuestion, a few
+questions at a time) to fit its standards, and read a few existing issues to check the answers: project, issue type,
+mandatory fields, components and labels, title and description format, workflow states and their meaning, who is
+assignee and reporter, how a fix is linked (comment, field, link to a version), when an issue may be closed. Record the
+answers in `.boomi-unit-testing` (`tracker.*` lines) so the next sessions follow them without asking again.
+
+**Keep the tracker up to date** for every issue: move it through the workflow as the work goes (for example "in
+progress" when the fix starts, "resolved" or the state the project uses when its tests are green), and comment the
+fix applied (components, versions, tests that prove it) or, when the agent cannot fix it, why and what is needed.
+Never move an issue to a state the interview reserved to people (for example "closed" after a review).
 
 **The loop**, for each defect the user let the agent fix:
 
@@ -277,13 +289,14 @@ vs actual, cause, proposed fix and the components it touches. Then ask the user 
    `[UT] <process> - regression <defect>` (with the issue key when there is one), the scenario that showed the defect.
 4. **Run all the `[UT]`s** of that `[S]` and of the processes that call it: a fix must not break another test.
 5. **Describe the fix** (what changed, which components, which versions, which tests prove it) in the issue of the
-   tracker when there is one, otherwise in the defect list.
+   tracker when there is one, and move it to the next state; otherwise in the defect list.
 6. Next defect. New defects found by these runs go into the defect list and into the same loop (they are new: ask
    the user before fixing them only if the earlier answer did not cover them).
 
 A defect is **not fixable by the agent** when the fix needs information or a decision the agent does not have (an
 unclear requirement, the behaviour of an external system, a change to a shared component), or when three or four
-attempts did not fix it (as in the Companion's problem-solving guide): record why and go on with the others.
+attempts did not fix it (as in the Companion's problem-solving guide): record why (in the issue too, with a comment)
+and go on with the others.
 
 **Final report**, when no fixable defect is left: the defects fixed (fix, `[S]` versions, non-regression `[UT]`,
 issue), the defects not fixed (why, what is needed from the user), and the items of "Final answer of the session"
@@ -304,5 +317,7 @@ issue), the defects not fixed (why, what is needed from the user), and the items
 | A red `[UT]` "fixed" by changing the expected value | the defect of the `[S]` is hidden | prove the cause (experiment process), then the question with three options |
 | `[UT] [S] Scarica fatture - ...` | double prefix | `[UT] Scarica fatture - ...` |
 | A defect fixed during level 2 | the set of tests stays incomplete, the user never chose | record it and go on; fixes are level 3, after asking |
-| Issues created in the bug tracker without asking | writes to an external system the user did not approve | ask first (project, issue type) |
+| Issues created in the bug tracker without asking | writes to an external system the user did not approve | ask first; with an existing project, interview the user on its standards |
+| A bug tracker proposed with no connector or MCP for it in the session | the agent cannot keep it updated | propose it only when a tool for it is available |
+| Issue left in its first state after the fix, or with no comment | the tracker no longer tells the truth | move it through the workflow and comment the fix, or why it could not be fixed |
 | A fix verified only by its own `[UT]` | it can break another path of the `[S]` or a caller | run all the `[UT]`s of the `[S]` and of its callers |
