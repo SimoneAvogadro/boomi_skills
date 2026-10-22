@@ -1,6 +1,6 @@
 ---
 name: boomi-unit-testing
-description: Use when a Boomi process or subprocess needs a unit test, a test harness, a mock or a stub, when [UT] test processes are built, run again or extended, when an environment must be chosen for unit tests, or when test deployments must be cleaned up - whatever connectors the process uses.
+description: Use when a Boomi process or subprocess needs a unit test, a test harness, a mock or a stub, when [UT] test processes are built, run again or extended to full coverage, when an environment must be chosen for unit tests, when the defects that unit tests found in the processes must be reported, tracked or fixed with non-regression tests, or when test deployments must be cleaned up - whatever connectors the process uses.
 ---
 
 # Boomi unit testing (strategy)
@@ -37,6 +37,18 @@ From the lowest priority to the highest:
 3. **Project or customer skills** (and the workspace `CLAUDE.md`): when one covers the same topic (naming, a unit-test
    strategy agreed by contract...), it wins over everything else.
 
+## The agentic workflow: three levels
+
+1. **Build the unit tests**: one `[UT]` per scenario, with the connector skills (sections from "Principles" to "Switch
+   the connections").
+2. **Run them all, to full coverage** ("Running the tests"): iterate until every process in scope has the `[UT]`s it
+   needs and all of them have run. A test with a bug is fixed; a defect of a process is **recorded**, not fixed, and
+   the work goes on.
+3. **Fix the processes** ("Fixing the processes"): report the defects, ask whether to track them and whether to fix
+   them, then loop run → identify → fix → non-regression test until every defect that can be fixed is fixed.
+
+Level 3 starts only after level 2 is complete, and only if the user agrees.
+
 ## Arrange, Act, Assert
 
 The `[UT]` follows the **Arrange-Act-Assert** pattern of unit testing (Bill Wake, 2001; the same idea as
@@ -46,8 +58,8 @@ Given-When-Then in BDD): prepare the inputs and the mocks, run the code under te
 
 1. **The process under test is not changed by its test.** Wherever possible the `[S]` runs in the `[UT]` exactly as
    it runs in production: same XML, same shapes, same connectors. Test data, mocks and checks live in the `[UT]`.
-   The `[S]` is changed only when the user explicitly picks option 1 or 2 of the question below, or chose a
-   policy that asks for the change.
+   The `[S]` is changed only when the user explicitly picks option 1 or 2 of the question below, chose a policy that
+   asks for the change, or lets the agent fix the defects in level 3.
 2. **Arrange and Assert are outside the `[S]`.** The `[UT]` prepares the mocks before the Process Call and checks what
    they captured after it.
 3. **Fidelity**: the only difference between production and test is the connections switched by extensions in the
@@ -72,7 +84,7 @@ Two cases lead to a change in the `[S]`:
 - **A test found a defect**: a `[UT]` fails and the cause is the `[S]`, not the test or the mock. Prove it first:
   reproduce the failing step alone in a temporary experiment process (`[UT] Experiment - <what>`, same operation, same
   mock, inputs that differ only in the suspected cause), and read what the Companion says about that connector. The
-  experiment process is part of the cleanup.
+  experiment process is part of the cleanup. In level 2 the defect is only recorded; the fixes are level 3.
 
 Never make the change on your own: propose it (what, where, the value, and every component it adds or changes, such
 as a new profile) and ask the user with AskUserQuestion, one question per change or one per group (up to four per
@@ -158,9 +170,23 @@ Start (No Data)
 
 ## Running the tests
 
-The tests run again and again (build, run, fix, run) until every process is complete and every test passes with
-adequate coverage. They run on a unit-test environment chosen once (prerequisite), and what the agent deploys for
-them must not stay behind afterwards (cleanup).
+Level 2: build and run until the set of tests is complete. Iterate:
+
+1. **Coverage**: for every `[S]` in scope, list what its tests must cover: every path of its Decision, Route and
+   Branch shapes, every connector operation (each read with data and with no data, each write checked), the error
+   paths (Try/Catch, Exception), and what the `[S]` returns. Plan one `[UT]` per scenario until the list is covered.
+2. **Build and run** the `[UT]`s, all of them, on the unit-test environment.
+3. **Classify every failure**:
+   - **bug in the test** (wrong mock data, wrong expected value, a check on the wrong key): fix the `[UT]`, run it
+     again;
+   - **defect of the process** (proved as in "When the `[S]` must change"): leave the `[UT]` red, record the defect
+     (`[S]`, failing `[UT]`, expected vs actual, cause, proposed fix) in the defect list, and **go on** building the
+     other tests. Do not fix the `[S]` at this level.
+4. Back to 1 until the coverage list is complete and every `[UT]` has run.
+
+Keep the defect list in the session, and in a file of the workspace (`unit-test-defects.md`) when the work spans
+sessions. The tests run on a unit-test environment chosen once (prerequisite), and what the agent deploys for them
+must not stay behind afterwards (cleanup).
 
 **Verdict from the status, diagnosis from the logs.** The checks are Decisions in the `[UT]` that end in an
 Exception: the status of the execution (`COMPLETE` or `ERROR`) and the Exception message (expected vs actual) are the
@@ -212,7 +238,8 @@ Several of the calls below have no Companion script. Make them through `boomi_ap
    and keep the `componentId`s. What is in the baseline is never undeployed by the agent.
 2. **Track every deploy** the agent makes for the tests: `[UT]` processes, `[S]` deployed on their own, mock libraries
    or components deployed by the agent, experiment processes.
-3. **When the work is done** (all processes complete, all tests passing): undeploy what the agent deployed and is not
+3. **When the work is done** (level 2 complete and, if the user wanted it, level 3; every `[UT]` green or red only for
+   a recorded defect): undeploy what the agent deployed and is not
    in the baseline (`boomi-undeploy.sh --by-component <file>`; a component that only travels inside a process package
    has no deployment of its own). A baseline component that the agent redeployed with a new version stays deployed:
    tell the user that the version on the environment changed.
@@ -228,6 +255,40 @@ Several of the calls below have no Companion script. Make them through `boomi_ap
    - the components to delete by hand (experiment processes): undeployed, but the scripts cannot delete components;
    - the `[UT]`s that are order-dependent or left red, and why.
 
+## Fixing the processes (level 3)
+
+This section is the loop and its reports only. How to change, push and deploy a process, and what to do with an
+unknown connector or platform behaviour, is the Companion's (`bc-integration:boomi-integration`, including its
+problem-solving guide).
+
+**Report and ask.** When level 2 is complete, report every defect of the defect list: `[S]`, failing `[UT]`, expected
+vs actual, cause, proposed fix and the components it touches. Then ask the user with AskUserQuestion:
+
+- **track them in a bug tracker?** (for example Jira, through the tools of the session): in which project, with which
+  issue type. Create the issues only after the yes: it is a write to an external system;
+- **may the agent fix them?** all of them, some of them, or none (the `[UT]`s stay red and document them).
+
+**The loop**, for each defect the user let the agent fix:
+
+1. **Fix** the `[S]` (Companion for the XML), push it, deploy it **only to the unit-test environment** (redeploy the
+   `[UT]`s that bundle it).
+2. **Run** its failing `[UT]`: it must turn green.
+3. **Add a non-regression `[UT]`** for the defect, when the failing test does not already pin it down:
+   `[UT] <process> - regression <defect>` (with the issue key when there is one), the scenario that showed the defect.
+4. **Run all the `[UT]`s** of that `[S]` and of the processes that call it: a fix must not break another test.
+5. **Describe the fix** (what changed, which components, which versions, which tests prove it) in the issue of the
+   tracker when there is one, otherwise in the defect list.
+6. Next defect. New defects found by these runs go into the defect list and into the same loop (they are new: ask
+   the user before fixing them only if the earlier answer did not cover them).
+
+A defect is **not fixable by the agent** when the fix needs information or a decision the agent does not have (an
+unclear requirement, the behaviour of an external system, a change to a shared component), or when three or four
+attempts did not fix it (as in the Companion's problem-solving guide): record why and go on with the others.
+
+**Final report**, when no fixable defect is left: the defects fixed (fix, `[S]` versions, non-regression `[UT]`,
+issue), the defects not fixed (why, what is needed from the user), and the items of "Final answer of the session"
+(cleanup). Every fixed `[S]` is deployed only on the unit-test environment: its release is the user's.
+
 ## Common mistakes
 
 | Mistake | Effect | Fix |
@@ -242,3 +303,6 @@ Several of the calls below have no Companion script. Make them through `boomi_ap
 | Fields of the `[S]` response read without checking it exists | path 2 fails with a generic error, path 3 never runs | Decision "response returned?" right after the Process Call |
 | A red `[UT]` "fixed" by changing the expected value | the defect of the `[S]` is hidden | prove the cause (experiment process), then the question with three options |
 | `[UT] [S] Scarica fatture - ...` | double prefix | `[UT] Scarica fatture - ...` |
+| A defect fixed during level 2 | the set of tests stays incomplete, the user never chose | record it and go on; fixes are level 3, after asking |
+| Issues created in the bug tracker without asking | writes to an external system the user did not approve | ask first (project, issue type) |
+| A fix verified only by its own `[UT]` | it can break another path of the `[S]` or a caller | run all the `[UT]`s of the `[S]` and of its callers |
