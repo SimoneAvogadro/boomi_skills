@@ -14,7 +14,7 @@
     },
     {
       "name": "boomi-unit-testing",
-      "description": "Unit testing Boomi processes inside Boomi: [UT] test processes, database mocked with mockjdbc, assertions on the expected DB writes",
+      "description": "Unit testing Boomi processes inside Boomi: [UT] test processes on an unchanged process under test, plus connector mocks (database operations with mockjdbc)",
       "source": "./plugins/boomi-unit-testing"
     }
   ]

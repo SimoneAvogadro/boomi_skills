@@ -1,10 +1,16 @@
 {
   "name": "boomi-unit-testing",
-  "description": "Unit testing Boomi processes inside Boomi: [UT] test processes, database mocked with mockjdbc, assertions on the expected DB writes",
-  "version": "0.3.0",
+  "description": "Unit testing Boomi processes inside Boomi: a strategy skill ([UT] test processes, unchanged process under test, test environment, cleanup) and one skill per mocked connector (database operations with mockjdbc)",
+  "version": "0.4.0",
   "author": {
     "name": "Simone Avogadro"
   },
   "license": "CC-BY-SA-4.0",
-  "keywords": ["boomi", "unit-testing", "mock", "database", "mockjdbc"]
+  "keywords": [
+    "boomi",
+    "unit-testing",
+    "mock",
+    "database",
+    "mockjdbc"
+  ]
 }

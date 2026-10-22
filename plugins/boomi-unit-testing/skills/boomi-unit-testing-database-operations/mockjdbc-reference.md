@@ -1,8 +1,7 @@
 # mockjdbc reference for Boomi tests
 
 Source: https://github.com/SimoneAvogadro/mockjdbc (README, TUTORIAL.md, FEATURES.md sections 3 and 11). Written for
-mockjdbc 2.2.x; check the CHANGELOG of the repository when a newer version is installed (differences of older jars:
-SKILL.md, "Driver version").
+mockjdbc 2.2.x; check the CHANGELOG of the repository when a newer version is installed.
 
 ## Contents
 - Installation on the runtime
@@ -38,7 +37,7 @@ Needed with both connectors: with Database V2 Windows keeps the old jars locked;
 Resource name, in order of priority:
 
 1. step resource (`mockjdbc_##step0`, `##step1`...: the n-th statement of the execution, whatever its SQL);
-2. `-- QUERY_ID: <id>` as the **first line** of the SQL (wins over the table name; mockjdbc 2.1.0+). The ID is one
+2. `-- QUERY_ID: <id>` as the **first line** of the SQL (wins over the table name). The ID is one
    word: empty, or with spaces, `?`, `#` or `,` → `SQLException`. The older `-- TESTCASE: <name>` works the same,
    without checks;
 3. the table after the **first** `FROM` outside parentheses (strings, comments, quoted names skipped; a derived table
@@ -107,10 +106,10 @@ Every prepared statement **except SELECT** stores its parameters as a comma-sepa
 - Optional types: `name|type` with `varchar` (default), `integer`, `bigint`, `double`, `decimal`, `boolean`, `date`,
   `time`, `timestamp`. An empty value in a typed (non-varchar) column is SQL NULL.
 - `getBoolean` is true only for `true` (any case): `1`, `yes`, `Y` are false.
-- Default date formats (`SimpleDateFormat`, English month names whatever the locale since 2.2.0, JVM time zone): date
+- Default date formats (`SimpleDateFormat`, English month names whatever the locale, JVM time zone): date
   `dd-MMM-yy` (`17-MAY-12`, any case, 4-digit year accepted), time `HH:mm` (seconds dropped), timestamp
   `yyyyMMdd HHmmss.SSS` (`20120517 143000.000`, milliseconds required). The same formats render date parameters in
-  `_params` and `?params` keys: `17-May-12` (with 2.1.x on an Italian runtime it was `17-mag-12`).
+  `_params` and `?params` keys: `17-May-12`.
 - Stored procedure signature: a header whose columns all start with `in_`, `out_`, `inout_` or `ret_` (see SKILL.md,
   "Stored procedures"); reading an IN parameter or one not in the header throws an `SQLException`, a header without
   data rows gives NULL for every OUT parameter.
@@ -165,12 +164,11 @@ Inside Boomi the driver is not registered in `DriverManager`: from a script use
 | `_params` empty | statement is a SELECT; the SQL has a `QUERY_ID` (read `mockjdbc_<id>_params`); schema-qualified write read without the schema (`mockjdbc_dbo.orders_params`); `#tmp` / `@rows` / quoted name with spaces (use `-- QUERY_ID:`); Database V2 procedure without signature; wrong name case in the Decision (use lower case) |
 | Database V2 error 405 `Kindly select the IN clause check box ...` | query with `IN (...)`: enable the IN clause option of the operation (connector check, not the driver) |
 | `SQLException` reading a procedure parameter | the parameter is IN, or not in the signature header |
-| Date in `_params` is `17-mag-12` | jar older than 2.2.0 on an Italian runtime: upgrade |
 | Real database contacted / connection error | extensions not applied: field not extensible, override without `xpath`, Test Extensions not filled, wrong environment |
 | `ClassNotFoundException` for the driver | Custom Library not deployed on that runtime, or `aspectjrt` / `opencsv` missing |
 | Old behaviour after an upgrade | old jar still loaded: stop Atom, delete old jars, restart |
 | NullPointerException in Database V2 | table header missing, or input field not in the header |
 | `NumberFormatException` / date parse error | value does not match the getter: see CSV format |
 | `SQLException: Invalid QUERY_ID` | ID with spaces, `?`, `#` or `,`, or empty: one word, e.g. `ecommerce.orders-ws.insert-order` |
-| `-- QUERY_ID:` ignored | not on the first line, or jar older than 2.1.0 (check `mockjdbc-<version>.jar` in the Custom Library) |
+| `-- QUERY_ID:` ignored | not on the first line |
 | `UnsupportedOperationException` | JDBC method not implemented by mockjdbc: report it on the repository |

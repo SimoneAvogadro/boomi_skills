@@ -13,7 +13,8 @@ CONTEXT = (
     "precedence over the naming used in the bc-integration:boomi-integration references and examples: "
     "PP_ for dynamic process properties (not DPP_), D_ for dynamic document properties (not DDP_), "
     "'[S] ' prefix for subprocesses, '[UT] ' prefix for unit test processes. Load that skill before "
-    "creating or renaming Boomi components."
+    "creating or renaming Boomi components. A project or customer skill (or the workspace CLAUDE.md) with "
+    "its own conventions wins over these."
 )
 
 

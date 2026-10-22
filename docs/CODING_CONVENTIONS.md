@@ -55,7 +55,7 @@ processes, which is where it is read.
 the folder holds. The suffix is used only when there is more than one, so the common case stays short.
 
 A listener exposes its logic through a thin wrapper: the listener process (no prefix) only receives the message and
-calls the `[S]` that does the work, so the logic can be tested (see the `boomi-unit-testing` skill).
+calls the `[S]` that does the work, so the logic can be tested on its own.
 
 ## 3. Names that are not renamed
 
@@ -72,6 +72,10 @@ The Boomi Companion skill (`bc-integration:boomi-integration`) is the reference 
 its documentation and examples use `DPP_` and `DDP_` and give no rule for process names. These conventions replace
 only the naming: everything else in the Companion stays valid. When an example from the Companion is reused, its
 names are translated (`DPP_FROM_WRAPPER` → `PP_FROM_WRAPPER`).
+
+The order of priority, from the lowest to the highest: the Boomi Companion (the same for everyone who uses Boomi),
+these conventions, and a project or customer skill (or the workspace `CLAUDE.md`) with its own conventions, which wins
+over both.
 
 ## 5. How the conventions are enforced
 

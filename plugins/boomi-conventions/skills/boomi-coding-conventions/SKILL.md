@@ -11,6 +11,10 @@ House naming rules for Boomi components. They **override the defaults of the Boo
 (`bc-integration:boomi-integration`), whose references and examples use `DPP_` / `DDP_`: when you copy an
 example from there, rename it with the prefixes below.
 
+Priority, from the lowest to the highest: the Boomi Companion (the same for everyone who uses Boomi) < these
+conventions < a project or customer skill, or the workspace `CLAUDE.md`, with its own conventions, which wins over
+both.
+
 ## Quick reference
 
 | Element | Convention | Example | Not |
@@ -53,7 +57,7 @@ Companion patterns translate directly: `DPP_FROM_WRAPPER` becomes `PP_FROM_WRAPP
 
 - `[S]`: any process whose start shape is passthrough (Data Passthrough) and that exists to be called by a
   Process Call, including the "business logic" subprocess of a listener wrapper.
-- `[UT]`: a process that exists only to test another process (see `boomi-unit-testing`). It is never deployed to
+- `[UT]`: a process that exists only to test another process. It is never deployed to
   production environments.
 - A `[UT]` process is not also `[S]`: one prefix per process.
 - Put the `[UT]` processes in a `Unit test` folder created **inside the folder of the processes they test** (tests
@@ -63,7 +67,7 @@ Companion patterns translate directly: `DPP_FROM_WRAPPER` becomes `PP_FROM_WRAPP
 ## Names you do not rename
 
 - Names fixed by something outside your component keep their spelling: properties read by a library or driver
-  (e.g. mockjdbc reads `mockjdbc_<query id or table>` and writes `mockjdbc_<query id or table>_params`), Boomi built-in properties
+  (e.g. the JDBC mock driver mockjdbc reads `mockjdbc_<name>` and writes `mockjdbc_<name>_params`), Boomi built-in properties
   (`meta.*`, `connector.*`, `mime.*`), names agreed with another team.
 - Existing components pulled from the account: new properties follow the convention; rename existing `DPP_` / `DDP_`
   properties only when asked, and then in every component that reads or writes them (a property name is a string,
@@ -94,4 +98,4 @@ grep -oE '<bns:Component [^>]*type="process"[^>]*' active-development/process/*.
 | `[S]` on a listener wrapper | The wrapper is the main process: no prefix; its called logic is `[S]` |
 | `[UT]`/`[S]` without the space, or as a suffix | `[UT] Name`, `[S] Name` |
 | `[UT]` processes in a generic `Test` folder, or in a central folder far from the code | `Unit test` folder inside the folder of the tested processes |
-| Prefixing `mockjdbc_*` properties with `PP_` | The driver reads only `mockjdbc_*`: keep the driver's name |
+| Prefixing the properties of a library or driver (e.g. `mockjdbc_*`) with `PP_` | The library reads only its own names: keep them |

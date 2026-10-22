@@ -1,42 +1,56 @@
 ---
 name: boomi-unit-testing
-description: Use when a Boomi process or subprocess needs a unit test, a mock, a stub or a test harness - especially when it reads or writes a database (Database Legacy or Database V2 connector, stored procedures) that is not reachable or must not be touched by the test, or when a test must fail by itself instead of someone reading Notify logs.
+description: Use when a Boomi process or subprocess needs a unit test, a test harness, a mock or a stub, when [UT] test processes are built, run again or extended, when an environment must be chosen for unit tests, or when test deployments must be cleaned up - whatever connectors the process uses.
 ---
 
-# Boomi unit testing (database mocked with mockjdbc)
+# Boomi unit testing (strategy)
 
 ## Overview
 
 A unit test is a **separate `[UT]` process** that prepares the data, calls the `[S]` subprocess under test
 **unchanged** with a Process Call, and checks the result with Decision shapes that end in an **Exception** when
-the check fails. The test passes when the execution completes, fails when it ends in error: no one has to read the
-logs.
+the check fails. The test passes when the execution completes, fails when it ends in error.
 
-The database is replaced by **mockjdbc** (https://github.com/SimoneAvogadro/mockjdbc), a JDBC driver that
-answers queries with CSV data taken from Dynamic Process Properties and records the parameters of every INSERT,
-UPDATE, DELETE and stored procedure call in other Dynamic Process Properties. The switch to mockjdbc happens only in
-the test run, through **extensions** of the database connection: the process and its connection keep pointing to
-the real database.
+**The goal**: the processes that go to production never contain logic of the kind "if I am in a test, then...".
+Every external system the `[S]` talks to (database, JMS, file system, HTTP...) is replaced in the test by switching
+its connection with extensions, and each connector, or condition, is mocked by **its own skill**:
+
+| Connector | Skill |
+|---|---|
+| Database Legacy, Database V2 (SQL, stored procedures) | `boomi-unit-testing-database-operations` |
+
+Load the skill of every connector the `[S]` uses. A connector with no skill: tell the user, and build its part of the
+test with your own Boomi knowledge, with the rules of this skill (the `[S]` unchanged, every check a Decision that
+ends in an Exception). Everything else in the `[UT]` (input documents and properties, the logic, the documents the
+`[S]` returns) is built the same way.
 
 **REQUIRED BACKGROUND:** `bc-integration:boomi-integration` for the XML of each shape and the push/deploy/execute
-scripts. **REQUIRED:** `boomi-coding-conventions` for names (`[S]`, `[UT]`, `PP_`, `D_`).
+scripts. Names (`[S]`, `[UT]`, `PP_`, `D_`, the `Unit test` folder) follow `boomi-coding-conventions`, or the
+project's own conventions when there are any.
 
-**Scope: the database part, added to the test.** This skill covers what a unit test needs for the database: mock the
-DB calls of the `[S]` and assert what it writes. The rest of the `[UT]` (the input documents and the `PP_` / `D_`
-properties the `[S]` expects, other connectors, the logic, the documents the `[S]` returns) is built with your own
-Boomi knowledge and the other skills available, in the same `[UT]` and with the same rules: the `[S]` unchanged, every
-check a Decision that ends in an Exception.
+## Which skill wins
+
+From the lowest priority to the highest:
+
+1. **Boomi Companion** (`bc-integration:boomi-integration`): the same for everyone who uses Boomi.
+2. **These skills** (unit testing, conventions): specialised for unit testing with agents, independent of the project.
+3. **Project or customer skills** (and the workspace `CLAUDE.md`): when one covers the same topic (naming, a unit-test
+   strategy agreed by contract...), it wins over everything else.
+
+## Arrange, Act, Assert
+
+The `[UT]` follows the **Arrange-Act-Assert** pattern of unit testing (Bill Wake, 2001; the same idea as
+Given-When-Then in BDD): prepare the inputs and the mocks, run the code under test once, check the outcome.
 
 ## Principles
 
 1. **The process under test is not changed by its test.** Wherever possible the `[S]` runs in the `[UT]` exactly as
-   it runs in production: same XML, same SQL, same shapes. Test data, mocks and checks live in the `[UT]` and in
-   the mockjdbc properties. The `[S]` is changed only when the user explicitly picks option 1 or 2 of the QUERY_ID
-   question below.
-2. **Arrange and Assert are outside the `[S]`.** The `[UT]` prepares the mock tables before the Process Call and
-   checks the captured writes after it.
-3. **Fidelity**: the only difference between production and test is the database connection, switched by
-   extensions in the test run.
+   it runs in production: same XML, same shapes, same connectors. Test data, mocks and checks live in the `[UT]`.
+   The `[S]` is changed only when the user explicitly picks option 1 or 2 of the question below.
+2. **Arrange and Assert are outside the `[S]`.** The `[UT]` prepares the mocks before the Process Call and checks what
+   they captured after it.
+3. **Fidelity**: the only difference between production and test is the connections switched by extensions in the
+   test run.
 
 ## Design the process so it can be tested
 
@@ -45,226 +59,78 @@ check a Decision that ends in an Exception.
 - The `[S]` takes everything it needs as input documents, `PP_` / `D_` properties or connections: no hardcoded
   test data, no "if test" branches inside it. Test data and checks live in the `[UT]` process only.
 - Every connection the `[S]` uses is a real component that the test can override with extensions.
-- Do not add a mock Message shape in the `[S]` main path, nor a test branch driven by a property: this skill
-  replaces the Companion "temporary Message" and `DPP_FROM_WRAPPER` patterns. Test code inside the `[S]` is
-  forgotten and reaches production.
+- Do not add a mock Message shape in the `[S]` main path, nor a test branch driven by a property (the Companion
+  "temporary Message" and `DPP_FROM_WRAPPER` patterns): test code inside the `[S]` is forgotten and reaches production.
 
-## Database calls: inventory, QUERY_ID question, mock key
+## When a mock needs a change in the `[S]`
 
-### Inventory
+A connector skill can find that a better test needs a small change in the `[S]` (for the database: a `-- QUERY_ID:`
+comment in the SQL). Never make it on your own: propose it (what, where, the value) and ask the user with
+AskUserQuestion, one question per change or one per group (up to four per call):
 
-Before writing the `[UT]`, list every database operation that the `[S]` runs, and those of the subprocesses it calls:
-Database Legacy (`<sql>` of the `profile.db`, or dynamic insert/update/delete) and Database V2 (SQL operations, or
-operations built from a table). For each one record: the step, the connector (Legacy or V2), the table or procedure,
-the kind (SELECT, INSERT, UPDATE, DELETE, stored procedure), whether the process defines its SQL text, and whether
-that SQL starts with `-- QUERY_ID:` or `-- TESTCASE:` (both count as an ID).
+1. **Yes, the agent does it.** The agent changes the `[S]`, pushes it and deploys it **only to the unit-test
+   environment**. It tells the user that the `[S]` changed and that deploying it where it runs (production and the
+   other environments) is part of their release; the agent never deploys there.
+2. **Yes, the user does it, and the agent waits.** The agent stops, says exactly what to change and where, and waits
+   for the confirmation. After it, the agent pulls the process again, checks the change, and only then goes on.
+3. **No, the agent uses an alternative** that leaves the `[S]` as it is (the connector skill says which).
 
-- **Already has an ID**: the test uses the ID keys (`mockjdbc_<id>`, `mockjdbc_<id>_params`). No question.
-- **SQL generated by the connector** (Legacy dynamic insert/update/delete; Database V2 Dynamic Insert and Dynamic
-  Get, whose `query` field is empty): there is no text to put the comment in. No question: choose the mock key
-  directly (below). With mockjdbc, Database V2 generates plain SQL such as
-  `Insert into payments(pay_id,amount) values (?,?)`: no schema, even with `schemaName` set, and no quotes, so the
-  table-name key works. Database V2 Standard Get/Insert/Update/Delete and Update Commit By Rows keep their SQL in the
-  operation: they get the question.
-- **Every other operation**: ask the QUERY_ID question.
+Put the trade-off in the question. The connector skill says when option 3 is the one to mark **(Recommended)**.
 
-### QUERY_ID question
+## Connector skills: what each one provides
 
-For each of these operations, propose an ID and ask the user with AskUserQuestion which of the three options applies.
-One question per operation, or one per group when there are many (up to four per call). Options:
+A skill that mocks a connector gives, for that connector:
 
-1. **Yes, the agent does it.** The agent adds `-- QUERY_ID: <id>` as the **first line** of the SQL, pushes the `[S]`
-   and deploys it **only to the test environment**, and writes the `[UT]` with the ID keys. It tells the user that the
-   `[S]` changed and that deploying it where it runs (production and the other environments) is part of their
-   release; the agent never deploys there.
-2. **Yes, the user does it, and the agent waits.** The agent stops, gives the user the exact operation and the ID to
-   add, and waits for the confirmation. After it, the agent pulls the process again, checks that the first line of
-   the SQL is the ID, and only then goes on.
-3. **No, the agent chooses another mock key** without touching the process (below).
-
-Put the trade-off in the question. The QUERY_ID is a comment on the first line: the real database ignores it, the
-process behaves the same in production, and the test gets a key that depends neither on the SQL text nor on the
-order of the statements. Option 3 keeps the `[S]` exactly as it is in production, with nothing to push or redeploy.
-Mark option 3 **(Recommended)** when key 1 or key 2 below covers the operation; otherwise recommend option 1 and say
-why (for example: a write on a temporary table `#tmp` is not captured by name and would need a step key).
-
-**ID names**: `<project>.<service>.<step>`, grouped by project, then by service / flow / interface, then a meaningful
-name for the step: `ecommerce.create-order-ws.select-customer`, `ecommerce.create-order-ws.insert-order`. One word of
-lower case letters, digits, `.`, `-`, `_`: spaces, `?`, `#` and `,` make the statement fail with an `SQLException`.
-Unique in the `[S]` and in the subprocesses it calls. Each ID has its own dataset and its own `#n` counter, whatever
-the table; two statements with the same ID share them.
-
-**Driver version**: this skill is written for mockjdbc **2.2.0** (Custom Library jar `mockjdbc-2.2.0.jar`, see
-"mockjdbc Custom Library" below). With an older jar, ask the user to upgrade the library; until then the rules change:
-2.1.x reads the word after the last `from`, captures writes only on letters-only names right after `INSERT INTO`
-(with a column list) / `UPDATE` / `DELETE`, writes dates with the JVM locale (`17-mag-12` on an Italian runtime) and
-cannot run "Stored Procedure" operations (`prepareCall`); before 2.1.0 there is no `QUERY_ID`, only
-`-- TESTCASE: <id>` (same behaviour, no checks on the name).
-
-**Existing tests**: once a query has an ID, `mockjdbc_<table>` and `mockjdbc_<table>_params` no longer match it, and
-the old test silently reads no rows or finds `_params` empty. Search the `[UT]` processes for the tables of those
-statements, update them in the same change and run them again.
-
-### Mock key without a QUERY_ID
-
-Compute the name the driver uses with its own rules, not by reading the SQL as a person would:
-
-- **SELECT**: the table after the **first** `FROM` outside parentheses (strings, comments and quoted names are
-  skipped): `... FROM orders WHERE id IN (SELECT id FROM blocked)` gives `orders`, `FROM (SELECT id FROM orders) o`
-  gives `orders`, `WITH x AS (...) SELECT * FROM x` gives `x` (the CTE name).
-- **INSERT [INTO] / UPDATE / DELETE [FROM]**: the table after the keyword, with or without the column list.
-- **Table names** (same rule for reads and writes): letters, digits, `_`, `$`; quotes `[]`, `""`, backticks removed
-  (`[customers]` gives `customers`); schema kept (`dbo.customers`, `[dbo].[customers]` and `[dbo.customers]` all give
-  `dbo.customers`). A qualified **read** looks for `mockjdbc_dbo.customers` first, then `mockjdbc_customers`; a
-  qualified **write** is captured only under the full name: `mockjdbc_dbo.customers_params`.
-- **Not named by the driver**: temporary tables (`#tmp`), table variables (`@rows`), quoted names with spaces, `?`,
-  `#` or `,` (`[order details]`). They need a QUERY_ID or a step key.
-- **Stored procedure**: the name after `EXEC`, `EXECUTE`, `CALL`, `{call ...}`, also through a "Stored Procedure"
-  operation: see "Stored procedures" below.
-
-Choose the key in this order:
-
-1. **Table name** (default): `mockjdbc_<table>` (rows) and `mockjdbc_<table>_params` (captured write), lower case.
-   It holds when the `[S]` has at most one read and at most one write on that table: every INSERT, UPDATE and DELETE
-   on a table writes the same `_params`, and the last one wins.
-2. **Table name + bound values**: `mockjdbc_<table>?<values>`, lower case, several values joined by `,`
-   (`mockjdbc_customers?c42,gold`), when several SELECTs on the same table differ by the values they bind. The key
-   depends on the values, not on the position, so it survives a reordering of the process. Reads only: writes are
-   not keyed by value.
-3. **Occurrence number** (backup): `mockjdbc_<table>#n` and `mockjdbc_<table>_params#n`, the n-th use of the name
-   (reads and writes share the counter). The only way to tell apart several writes on the same table. It breaks when
-   the statements on that name are reordered.
-4. **Step number** (last backup): `mockjdbc_##stepN`, the n-th JDBC statement the connector creates in the execution
-   (from 0), whatever its SQL. For statements that keys 1-3 cannot name (`#tmp`, `@rows`, `[order details]`).
-   When `mockjdbc_##stepN` is defined, that statement uses it before any QUERY_ID or table name: rows for a read, the
-   update count (`1`) for a write, whose parameters are then in `mockjdbc_##stepN_params` (no `#n`). It breaks when
-   any statement before it is added, removed or moved, and the count depends on how the connector creates its
-   statements: confirm N with a first run.
-
-With keys 3 and 4 the `[UT]` says so in the label of the Set Properties or Decision shape (`order-dependent: step 2`),
-and the answer to the user says that the test must be reviewed when the order of the `[S]` changes.
-
-Database V2 reads the metadata of a written table **by table name** whatever the key: the header-only mock of a
-written table is `mockjdbc_<table>` in every case (see reference).
-
-### Stored procedures
-
-The resource is `mockjdbc_<procedure>` (lower case), and its header says what the call returns:
-
-- **Signature** (every column starts with `in_`, `out_`, `inout_` or `ret_`): the procedure answers with OUT
-  parameters. The columns follow the order of the `?` of the call (`ret_` is the return value of `{? = call ...}`),
-  the `|type` is the parameter type, the first data row gives the OUT values (IN values are ignored):
-  `in_customer_id|integer,out_status,out_message` + `,OK,Saved`.
-- **Any other header**: the result set of the procedure, as for a table.
-
-Captured: `mockjdbc_<procedure>_params` holds the IN and IN OUT values only. Different answers per call or per IN
-values work as for tables (`mockjdbc_<procedure>#2`, `mockjdbc_<procedure>?c42`).
-
-What to define for each way Boomi calls a procedure:
-
-| Boomi | Resource | Assert on |
-|---|---|---|
-| Legacy profile *Stored Procedure Read*, OUT parameters | signature in the order of the profile parameters (`ret_` for a *Return* parameter) | the OUT values in the output document |
-| Legacy profile *Stored Procedure Read*, rows | plain header | one document per row |
-| Legacy profile *Stored Procedure Write*, Program Command *Stored Procedure* | none needed | `mockjdbc_<procedure>_params` |
-| Database V2 *Stored Procedure*, OUT parameters | signature named after the profile fields (`in_customer_id` for `customer_id`), with `\|type` | `mockjdbc_<procedure>_params`, and the JSON with one field per OUT parameter |
-| Database V2 *Stored Procedure*, rows | plain header | one document per row; the IN values are **not** captured |
-| Map *SQL Lookup* / parameter value *Stored Procedure* | signature (inputs first, then outputs) | the value the map or the shape gets |
-
-The Database V2 *Stored Procedure* operation asks the driver which parameters the procedure has
-(`getProcedureColumns`), and mockjdbc answers only from a signature. A procedure that **returns rows** is mocked with
-a plain header, which is no signature: the connector calls it with no parameters, so the rows come back but the IN
-values cannot be asserted (`_params` stays empty). A resource is either a signature or a result set, so with
-mockjdbc 2.2.0 there is no way to have both; the test checks the rows and what the `[S]` does with them. Not
-supported either: REF CURSOR parameters, several result sets, functions (mockjdbc `FUTURE.md`, item 5).
+1. the **inventory** of its operations in the `[S]` and in the subprocesses it calls;
+2. the **changes to the `[S]`** that would help, to propose with the question above, and the alternatives;
+3. the **connection fields** to override and their test values;
+4. the **runtime prerequisites** (libraries, components) and what to do when they are missing;
+5. the **Arrange** part: how to give the mock its data;
+6. the **Assert** part: what the mock captures and how to compare it;
+7. its common mistakes.
 
 ## The `[UT]` process
 
 Create it in a folder named `Unit test`, inside the folder of the process under test (`Unit test - <description>` if
-the folder has several groups of tests); see `boomi-coding-conventions`.
+the folder has several groups of tests), named `[UT] <process under test> - <scenario>`.
 
 ```
 [UT] <process under test> - <scenario>
 Start (No Data)
 └─ Branch  (Boomi runs the paths one after the other, in order)
-   1 Arrange: Message "Mock customers" (CSV)
-              → Set Properties mockjdbc_customers = Current Data
-              → Message "Mock orders" (header only, DB V2) → Set Properties mockjdbc_orders = Current Data
-              → Stop (continue)
-   2 Act:     Message "Input order" (the document the [S] receives) → Process Call "[S] ..."
-              → Stop (continue)
-   3 Assert:  Decision "INSERT orders as expected?"
-                mockjdbc_orders_params = "1001,C42,GOLD,250.00"
+   1 Arrange: mock data of each connector (connector skills), input properties → Stop (continue)
+   2 Act:     Message "Input ..." (the document the [S] receives) → Process Call "[S] ..." → Stop (continue)
+   3 Assert:  Decision "<what is checked>?"
               ├ true  → next Decision ... → Stop (continue)
-              └ false → Exception "orders insert: expected 1001,C42,GOLD,250.00 got {1}"
+              └ false → Exception "<check>: expected <value> got {1}"
 ```
 
-The example uses the table-name keys (option 3, key 1). With a QUERY_ID (options 1 and 2) the keys are
-`mockjdbc_<query id>` and `mockjdbc_<query id>_params`.
-
-- **Arrange**: one Message (CSV, header first, comma separator) + one Set Properties per query the `[S]` runs.
-  The property is `mockjdbc_` + the key chosen for that operation (QUERY_ID or mock key, lower case). Tables that are only written still need
-  the header with Database V2 (see reference).
 - **Act**: the input document of the `[S]` comes from a Message shape in the `[UT]` (the execution API cannot inject
   documents). Call the `[S]` with a Process Call (`wait="true"`, `abort="true"`): it shares the Dynamic Process
-  Properties of the test, so it reads the mock tables and its writes are captured.
-- **Assert**: in the last Branch path, one Decision per expected write: first value Dynamic Process Property
-  `mockjdbc_<key>_params`, Equal To, the expected parameters **comma-separated in the order of the `?`**. False →
-  Exception (`stopsingledoc="false"`, so the whole execution ends in ERROR) whose message shows expected and
-  actual value (`{1}` = the same property). Each value is the `toString()` of what the connector binds: a Double
-  `250` is `250.0`, a date uses the mockjdbc date format. When unsure, run the test once, read the actual value in
-  the Exception message, and set it as expected only after checking that it is right. Same query run several times: check
-  `mockjdbc_<key>_params#1`, `#2`, ... Checks on the documents the `[S]` returns, or on its other effects, are not
-  database checks: build them as the Scope above says.
-- One scenario per `[UT]` process is the default; several scenarios in one process need `mockjdbc#RESET` between them.
+  Properties of the test.
+- **Assert**: one Decision per check. False → Exception (`stopsingledoc="false"`, so the whole execution ends in
+  ERROR) whose message shows expected and actual value (`{1}`). When unsure of the exact value, run the test once,
+  read the actual value in the Exception message, and set it as expected only after checking that it is right.
+- One scenario per `[UT]` process is the default.
 
-## Switch the connection to mockjdbc (only for the test)
+## Switch the connections (only for the test)
 
-| Connection field (extension) | Database (Legacy) | Database V2 (`GenericConnectionConfig`) | Test value |
-|---|---|---|---|
-| Driver Type | yes | (no such field) | `Custom` |
-| Class Name | yes | `className` | `me.avogadro.mockjdbc.MockJdbcDriver` |
-| Connection URL | yes | `url` | `any` |
-
-User name and password stay those of the real connection: mockjdbc ignores them.
-
-1. In the `[UT]` process Extensions → Connection Settings: make **all** these fields of the `[S]`'s DB connection
-   extensible, always: with the legacy connector **Driver Type, Class Name and Connection URL**, even when the
-   connection already uses `Custom`. Only the `Custom` driver type uses the Class Name: a connection with a
-   predefined type (SQL Server, Oracle, ...) ignores the mockjdbc class, and the test would reach the real driver.
-   A `[UT]` without the Driver Type extension works only by chance and breaks when the connection changes type.
-   Extensions are declared on the process that is deployed and run (the `[UT]`) and apply to the connections of the
-   subprocesses it calls. Declare them in the GUI or start from a pulled process that has them: each override needs its
-   connector-specific `xpath`, otherwise it is silently ignored (Companion error reference, Issue #31).
-2. **mockjdbc Custom Library**: before the first test on an environment, check (Companion scripts) that
-   - `boomi-component-search.sh --type customlibrary` + `boomi-component-pull.sh` finds a library with
-     `<Type>connector</Type>`, the `<connectorType>` of the `[S]`'s connection (`database` = Database Legacy,
-     `officialboomi-X3979C-dbv2da-prod` = Database V2) and `Files` `mockjdbc-*.jar`, `opencsv-*.jar`, `aspectjrt-*.jar`
-     (the version in the mockjdbc jar name: 2.2.0 or later for the rules of this skill, see "Driver version");
-   - it is deployed on the test environment: `POST DeployedPackage/query` with `environmentId`, `componentId` of
-     the library, `active` = `true` (the lookup of `boomi-undeploy.sh --by-component`; no read-only script).
-
-   No such library: **stop**. Tell the user that uploading the jars and creating the library are manual (Boomi has
-   no API to upload jars), point to
-   https://github.com/SimoneAvogadro/mockjdbc/blob/master/FEATURES.md#setting-up-the-custom-library and wait for
-   their confirmation; never upload jars or create the library yourself. After the confirmation check again.
-   Library found but not deployed there: `boomi-deploy.sh <pulled library XML>` (to `BOOMI_ENVIRONMENT_ID`, the test
-   environment), then go on.
-3. Run it:
+1. In the `[UT]` process Extensions → Connection Settings: make extensible every field that the connector skill lists,
+   always all of them. Extensions are declared on the process that is deployed and run (the `[UT]`) and apply to the
+   connections of the subprocesses it calls. Declare them in the GUI or start from a pulled process that has them:
+   each override needs its connector-specific `xpath`, otherwise it is silently ignored (Companion error reference,
+   Issue #31).
+2. Run it:
    - **GUI**: Test → Test Extensions → Connection Settings → untick "Use connection component value" for those
-     fields and enter the values above.
-   - **Automated** (Companion scripts): deploy the `[UT]` to the **unit-test environment** (see "Prerequisite: choose
-     the unit-test environment" below), set the values as
-     Environment Extensions there (`boomi-extensions.sh`, legacy Driver Type value `custom`), run
-     `boomi-test-execute.sh --process-id <[UT] id>`; the test passed if the status is `COMPLETE`, failed if `ERROR`
-     (the Exception message says why).
-   - **After every `set`, `get` again**: each of the three fields must show the value with `useDefault: false`. The
-     platform can accept a `set` and keep the default without any error (seen with Driver Type on a field added to
-     the declarations by a redeploy; once saved in the GUI, later API writes work). A field still at
-     `useDefault: true`: **stop**, ask the user to set it once in Manage → Environment Extensions of the test
-     environment (untick "Use connection component value"), then `get` again before running the test. Running
-     with a field at its default can reach the real driver.
-4. Never set the mockjdbc values on an environment where real processes run.
+     fields and enter the test values.
+   - **Automated** (Companion scripts): deploy the `[UT]` to the unit-test environment (below), set the values as
+     Environment Extensions there (`boomi-extensions.sh`), run `boomi-test-execute.sh --process-id <[UT] id>`.
+   - **After every `set`, `get` again**: each field must show the value with `useDefault: false`. The platform can
+     accept a `set` and keep the default without any error (seen on a field added to the declarations by a redeploy;
+     once saved in the GUI, later API writes work). A field still at `useDefault: true`: **stop**, ask the user to
+     set it once in Manage → Environment Extensions of the test environment (untick "Use connection component
+     value"), then `get` again before running the test. Running with a field at its default reaches the real system.
+3. Never set test values on an environment where real processes run.
 
 ## Running the tests
 
@@ -272,30 +138,28 @@ The tests run again and again (build, run, fix, run) until every process is comp
 adequate coverage. They run on a unit-test environment chosen once (prerequisite), and what the agent deploys for
 them must not stay behind afterwards (cleanup).
 
-**Verdict from the status, diagnosis from the logs.** The checks on what mockjdbc captured are Decisions in the `[UT]`
-that end in an Exception: the status of the execution (`COMPLETE` or `ERROR`) and the Exception message (expected vs
-actual) are the result, with no log to download, which keeps each run fast. The process log is still the tool to
-understand why a `[UT]` fails when the message is not enough (a connector error, a query that found no mock, a path
-not taken): download it (`boomi-execution-query.sh --execution-id <id> --logs`) for the failed runs, not for every
-run.
+**Verdict from the status, diagnosis from the logs.** The checks are Decisions in the `[UT]` that end in an
+Exception: the status of the execution (`COMPLETE` or `ERROR`) and the Exception message (expected vs actual) are the
+result, with no log to download, which keeps each run fast. The process log is still the tool to understand why a
+`[UT]` fails when the message is not enough (a connector error, a mock that found no data, a path not taken):
+download it (`boomi-execution-query.sh --execution-id <id> --logs`) for the failed runs, not for every run.
 
 ### Prerequisite: choose the unit-test environment
 
-The database is mocked through **Environment Extensions**, and an extension value on a connection applies to that
-connection in the whole environment: every process deployed there that declares those fields extensible takes the
-environment value. On an environment shared with other uses (for example the same environment for unit tests and for
-user acceptance tests, "collaudo"), setting mockjdbc on a connection switches the other processes that use it to the
-mock as well. So, before the first deploy:
+An Environment Extension value on a connection applies to that connection in the whole environment: every process
+deployed there that declares those fields extensible takes the environment value. On an environment shared with other
+uses (for example the same environment for unit tests and for user acceptance tests, "collaudo"), switching a
+connection to a mock switches the other processes that use it as well. So, before the first deploy:
 
 1. **Candidates**: list the environments of the account (`POST Environment/query`) and keep those classified `TEST`
    with a runtime attached (`POST EnvironmentAtomAttachment/query`). A `PROD` environment is never a candidate.
-2. **Connections**: collect the database connections the `[UT]` will override (those of the `[S]` and of the
-   subprocesses it calls).
+2. **Connections**: collect the connections the `[UT]` will override (those of the `[S]` and of the subprocesses it
+   calls).
 3. **Conflicts**, for each candidate and each of those connections, with read-only calls (`GET
    EnvironmentExtensions/<environmentId>`; `boomi-extensions.sh get` reads only `BOOMI_ENVIRONMENT_ID`):
    - the connection already has extension values on the environment (a field with `useDefault: false` that is not
-     the mockjdbc value): someone uses it with a real database there;
-   - the connection is deployed there in a process that is not a `[UT]`: the mockjdbc values would switch it too.
+     a test value): someone uses it with a real system there;
+   - the connection is deployed there in a process that is not a `[UT]`: the test values would switch it too.
      One call covers every environment: `POST ConnectionLicensingReport` (body `{}`, or a `QueryFilter` on
      `environmentId`) returns a download `url`; `GET` it with the same credentials (retry while it is not ready) to
      get a CSV with one row per deployed connection and process: `ENVIRONMENT_ID`, `ENVIRONMENT_CLASS`,
@@ -304,12 +168,12 @@ mock as well. So, before the first deploy:
      can be earlier than the latest deployments: for those, also check `POST DeployedPackage/query` on the
      environment for packages deployed after that time.
 
-   A candidate with neither is free; mockjdbc values already set by earlier unit tests are not a conflict.
+   A candidate with neither is free; test values already set by earlier unit tests are not a conflict.
 4. **Choice**: show the user the candidates and what was found on each, and ask with AskUserQuestion which one to use
    (a free one recommended). Only one candidate, and it has conflicts (or none at all): **stop**, explain the
    conflict (which connection, which processes or values) and agree with the user how to go on, for example a new
    `TEST` environment with its own runtime (created by the user), or runs from the GUI with Test Extensions, which
-   apply to that run only. Never set mockjdbc values on a connection with a conflict.
+   apply to that run only. Never set test values on a connection with a conflict.
 5. The Companion scripts deploy and write extensions on `BOOMI_ENVIRONMENT_ID`: if the chosen environment is another
    one, ask the user to change it in the workspace `.env` (or to let the agent do it) before the first deploy.
 
@@ -318,8 +182,8 @@ mock as well. So, before the first deploy:
 1. **Baseline, before the first deploy of the session**: list what is already active on the test environment
    (`POST DeployedPackage/query` with `environmentId` and `active` = `true`, as in `boomi-undeploy.sh --by-component`)
    and keep the `componentId`s. What is in the baseline is never undeployed by the agent.
-2. **Track every deploy** the agent makes for the tests: `[UT]` processes, `[S]` deployed on their own, the mockjdbc
-   Custom Library when the agent deployed it, components made for an experiment.
+2. **Track every deploy** the agent makes for the tests: `[UT]` processes, `[S]` deployed on their own, mock libraries
+   or components deployed by the agent, components made for an experiment.
 3. **When the work is done** (all processes complete, all tests passing): undeploy what the agent deployed and is not
    in the baseline (`boomi-undeploy.sh --by-component <file>`; a component that only travels inside a process package
    has no deployment of its own). A baseline component that the agent redeployed with a new version stays deployed:
@@ -327,54 +191,17 @@ mock as well. So, before the first deploy:
 4. **Long chain of sessions**: when more development-test-improvement rounds are expected (open work, the user said
    so, the feature is only partly built), ask the user before undeploying: keep the test deployments for the next
    session, or remove them now. Kept deployments are listed in the final answer, so the next session can clean them.
-5. **Extension values stay**: the mockjdbc values on the unit-test environment are not reverted (the next tests need
+5. **Extension values stay**: the test values on the unit-test environment are not reverted (the next tests need
    them), but the final answer of the session always lists them: environment, connection, fields and values.
-
-## Quick reference
-
-| Need | Dynamic Process Property |
-|---|---|
-| rows returned by the query `-- QUERY_ID: ecommerce.create-order-ws.select-customer` | `mockjdbc_ecommerce.create-order-ws.select-customer` = CSV |
-| parameters of the last run of a write with a QUERY_ID | read `mockjdbc_<query id>_params` (each run: `#1`, `#2`...) |
-| rows returned by `SELECT ... FROM customers` (default key) | `mockjdbc_customers` = CSV |
-| typed columns / NULL | header `id\|integer,amount\|double,day\|date`; empty value in a typed column = NULL |
-| different rows for the 1st, 2nd... query on the table (backup, order-dependent) | `mockjdbc_customers#1`, `#2` (fallback: `mockjdbc_customers`) |
-| result of a stored procedure `EXEC get_rate ?` | `mockjdbc_get_rate` |
-| parameters of the last INSERT/UPDATE/DELETE on `orders` | read `mockjdbc_orders_params` |
-| parameters of each write (backup, order-dependent) | read `mockjdbc_orders_params#1`, `#2`... |
-| parameters of a stored procedure call | read `mockjdbc_<proc>_params` |
-| several SELECTs on the same table, different bound values | `mockjdbc_customers?c42`, `mockjdbc_customers?c42,gold` |
-| rows of `SELECT ... FROM dbo.customers` | `mockjdbc_dbo.customers`, else `mockjdbc_customers` |
-| parameters of a write on `[dbo].[orders]` | read `mockjdbc_dbo.orders_params` (full name only) |
-| OUT parameters of `{call save_order(?, ?, ?)}` | `mockjdbc_save_order` = `in_id\|integer,out_status,out_message` + `,OK,Saved` |
-| IN values of a procedure call | read `mockjdbc_<procedure>_params` |
-| write on `#tmp`, `@rows`, `[order details]` | a `-- QUERY_ID:` (options 1 or 2); without one, step key `mockjdbc_##stepN` = `1`, read `mockjdbc_##stepN_params` |
-| restart the `#n` counters inside one execution | set `mockjdbc#RESET` = `true` |
-
-`mockjdbc_*` names are defined by the driver: they are the exception to the `PP_` prefix. Details, CSV format, date
-formats, Database V2 rules and troubleshooting: [mockjdbc-reference.md](mockjdbc-reference.md).
 
 ## Common mistakes
 
 | Mistake | Effect | Fix |
 |---|---|---|
-| Branch paths in the wrong order | Mock not yet set when the `[S]` queries (no rows), or check run before the write | Path 1 arrange, path 2 Process Call, path 3 assert |
-| `mockjdbc_Customers` / `PP_mockjdbc_customers` | Driver does not find it, query returns no rows | lower case, no prefix: `mockjdbc_customers` |
-| Mocking `mockjdbc_customers` for a query that has a `QUERY_ID` | no rows / `_params` empty: the ID wins over the table | use `mockjdbc_<query id>` |
-| `QUERY_ID` added to the SQL, old `[UT]`s not updated | they still mock and check the table names, and fail or pass by chance | update every `[UT]` of those statements in the same change |
-| `QUERY_ID` added to the `[S]` without asking the user | the test no longer runs the production process unchanged | ask the QUERY_ID question (three options) first |
-| `-- QUERY_ID:` on the second line, or `-- QUERY_ID: insert order` | not an ID (table name used), or `SQLException` | first line, one word |
-| Expected value with spaces or in column order | Decision false | parameters in `?` order, comma, no spaces: `1001,C42,GOLD,250.00` |
-| Asserting a SELECT through `_params` | always empty | SELECT parameters are never captured: use `?params` mocks to check them indirectly |
-| Key by occurrence (`#n`) or step (`mockjdbc_##stepN`) as the first choice | breaks when the process is reordered | table name, then table + values; `#n`, then `##stepN` only as backup, labelled order-dependent |
-| Several writes on the same table asserted on `mockjdbc_<table>_params` | only the last write is there | `_params#1`, `#2`... (key 3) or a QUERY_ID per statement |
-| Write on `dbo.orders` asserted on `mockjdbc_orders_params` | always empty: writes are captured under the full name | `mockjdbc_dbo.orders_params` |
-| Write on `#tmp` / `@rows` / `[order details]`, keyed by table | not captured by name: `_params` stays empty | QUERY_ID (options 1 or 2), or step key 4 |
-| Database V2 *Stored Procedure* that returns rows, IN values asserted on `_params` | always empty: without a signature the connector calls it with no parameters | not possible with 2.2.0: assert the rows and their use; with OUT parameters, a signature named after the profile fields |
-| Rules of this skill used with a 2.1.x jar | names, dates and procedures behave differently | upgrade the Custom Library to 2.2.0 (see "Driver version") |
-| Database V2 insert into a table without mock header | NullPointerException in the connector | define `mockjdbc_orders` with the header (types included) |
-| A stub switch in the `[S]` (Decision on `PP_DB_STUB` → stub subprocess instead of the DB connector) | test code shipped to production; the real DB operations are never exercised | `[S]` unchanged, DB connection switched to mockjdbc by extensions |
-| Hand-written stub subprocesses that record the "inserted" values | the connector step, its SQL and its parameter binding are not tested | mockjdbc behind the real operation captures what the connector actually sends |
+| Branch paths in the wrong order | mock data not yet set when the `[S]` runs, or check run before the `[S]` | path 1 arrange, path 2 Process Call, path 3 assert |
+| A stub switch in the `[S]` (Decision on `PP_STUB` → stub subprocess instead of the connector) | test code shipped to production; the real connector step is never exercised | `[S]` unchanged, connection switched by extensions |
+| Hand-written stub subprocesses that record what was "sent" | the connector step and its parameters are not tested | a mock behind the real connector (connector skill) |
+| A change to the `[S]` made for the test without asking | the test no longer runs the production process unchanged | the question with three options first |
 | Test "passes" by reading Notify output | needs a human, not repeatable | Decision + Exception |
-| Extension field without `xpath` | real DB is used | declare the override from the GUI / a pulled component |
-| Old jar still on the runtime | old behaviour | stop the Atom, delete old jars, restart |
+| Extension field without `xpath` | the real system is used | declare the override from the GUI / a pulled component |
+| Test values set on an environment shared with other processes | those processes switch to the mock too | choose the unit-test environment first (prerequisite) |
