@@ -46,7 +46,8 @@ Given-When-Then in BDD): prepare the inputs and the mocks, run the code under te
 
 1. **The process under test is not changed by its test.** Wherever possible the `[S]` runs in the `[UT]` exactly as
    it runs in production: same XML, same shapes, same connectors. Test data, mocks and checks live in the `[UT]`.
-   The `[S]` is changed only when the user explicitly picks option 1 or 2 of the question below.
+   The `[S]` is changed only when the user explicitly picks option 1 or 2 of the question below, or chose a
+   policy that asks for the change.
 2. **Arrange and Assert are outside the `[S]`.** The `[UT]` prepares the mocks before the Process Call and checks what
    they captured after it.
 3. **Fidelity**: the only difference between production and test is the connections switched by extensions in the
@@ -84,9 +85,10 @@ call):
    for the confirmation. After it, the agent pulls the process again, checks the change, and only then goes on.
 3. **No, the agent uses an alternative** that leaves the `[S]` as it is (the connector skill says which).
 
-Put the trade-off in the question. For a mock, the connector skill says which option to recommend, and when an
-alternative without changes is good enough to skip the question and only inform the user; for a defect, option 3
-means leaving the `[UT]` red, which documents the defect.
+Put the trade-off in the question. For a defect, option 3 means leaving the `[UT]` red, which documents the defect.
+For changes that a mock would need in every process (for the database, the QUERY_ID), a connector skill can ask the
+user once for a **policy** instead, and record it in the file `.boomi-unit-testing` in the workspace directory, one
+`key=value` per line: from then on the policy answers the question.
 
 ## Connector skills: what each one provides
 
@@ -233,7 +235,7 @@ Several of the calls below have no Companion script. Make them through `boomi_ap
 | Branch paths in the wrong order | mock data not yet set when the `[S]` runs, or check run before the `[S]` | path 1 arrange, path 2 Process Call, path 3 assert |
 | A stub switch in the `[S]` (Decision on `PP_STUB` → stub subprocess instead of the connector) | test code shipped to production; the real connector step is never exercised | `[S]` unchanged, connection switched by extensions |
 | Hand-written stub subprocesses that record what was "sent" | the connector step and its parameters are not tested | a mock behind the real connector (connector skill) |
-| A change to the `[S]` made for the test without asking | the test no longer runs the production process unchanged | the question with three options first |
+| A change to the `[S]` made for the test without asking | the test no longer runs the production process unchanged | the question with three options (or the user's policy) first |
 | Test "passes" by reading Notify output | needs a human, not repeatable | Decision + Exception |
 | Extension field without `xpath` on a connector with its own settings (Database Legacy...) | the real system is used | copy the block from the connector skill or a pulled component (SDK connectors such as Database V2 have no `xpath`: that is fine) |
 | Test values set on an environment shared with other processes | those processes switch to the mock too | choose the unit-test environment first (prerequisite) |
