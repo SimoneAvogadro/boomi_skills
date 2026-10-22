@@ -81,10 +81,15 @@ Two cases lead to a change in the `[S]`:
 
 - **A mock needs it**: a connector skill finds that a better test needs a small change (for the database: a
   `-- QUERY_ID:` comment in the SQL).
-- **A test found a defect**: a `[UT]` fails and the cause is the `[S]`, not the test or the mock. Prove it first:
-  reproduce the failing step alone in a temporary experiment process (`[UT] Experiment - <what>`, same operation, same
-  mock, inputs that differ only in the suspected cause), and read what the Companion says about that connector. The
-  experiment process is part of the cleanup. In level 2 the defect is only recorded; the fixes are level 3.
+- **A test found a defect**: a `[UT]` fails and the cause is the `[S]`, not the test or the mock. Prove it first.
+  Direct evidence is enough: the values the mock captured for that step, a stack trace that points at the component,
+  or a comparison with a component of the same kind that works on the same runtime. Otherwise reproduce the failing
+  step alone in a temporary experiment process (`[UT] Experiment - <what>`, same operation, same mock, inputs that
+  differ only in the suspected cause), and read what the Companion says about that connector; the experiment process
+  is part of the cleanup. In level 2 the defect is only recorded; the fixes are level 3.
+- **Reading the code found a defect** that no test can show (a mock does not see it: the connector skill says
+  which, for example SQL literals). Record it as "found by review", with the line and the part of the spec it
+  breaks; its fix is checked by reading, not by a test.
 
 Never make the change on your own: propose it (what, where, the value, and every component it adds or changes, such
 as a new profile) and ask the user with AskUserQuestion, one question per change or one per group (up to four per
@@ -116,8 +121,9 @@ A skill that mocks a connector gives, for that connector:
 
 ## The `[UT]` process
 
-Create it in a folder named `Unit test`, inside the folder of the process under test (`Unit test - <description>` if
-the folder has several groups of tests). The name is `[UT] ` + the name of the process under test **without** its
+Create it in a folder named `Unit test`, inside the folder of the process under test. When that folder holds several
+`[S]` with their tests, one folder per group: `Billing/Unit test - Get customer balance`,
+`Billing/Unit test - Send invoice reminders`. The name is `[UT] ` + the name of the process under test **without** its
 `[S] ` prefix + ` - <scenario>`: `[S] Scarica fatture` → `[UT] Scarica fatture - fattura duplicata`.
 
 ```
@@ -136,14 +142,25 @@ Start (No Data)
   Properties of the test. To get the documents the `[S]` returns, the Process Call lists its Return Documents shape
   (`<returnpaths childShapeName="<shape name of the Return Documents in the [S]>"/>`, Companion
   `references/steps/process_call_step.md`).
-- **Check that the response exists before reading it**: right after the Process Call, a Decision "response
-  returned?" ending in an Exception. Otherwise an empty or broken response makes the shape that reads its fields fail
-  in path 2 with a generic error, and the checks of path 3 never run.
+- **Check that the response exists before reading it**: on each return path of the Process Call, a Set Properties
+  `PP_RETURNED_<PATH>` = `Y` (and the fields to check into `PP_ACTUAL_*`), and in path 3 a Decision per path ("the
+  expected path returned? the others did not?") ending in an Exception. Otherwise an empty or broken response makes the
+  shape that reads its fields fail in path 2 with a generic error, and the checks of path 3 never run.
+- **A scenario where the `[S]` must fail** (it ends in an Exception by design, for example "Order not paid"): wrap
+  the Process Call in a Try/Catch; the catch path stores `meta.base.catcherrorsmessage` in a property, and path 3
+  checks it (Decision with a wildcard or regex on the expected message) and checks that no write happened. The
+  Exception of the `[S]` is caught by the `[UT]`'s Try/Catch also with `abort="true"`. Without the Try/Catch the
+  expected error turns the test red.
+- **A caller with no `[S]` prefix** (a batch process with a "No Data" start that calls the `[S]`): it can be tested
+  the same way, with a Process Call from the `[UT]`, named `[UT] <caller name> - <scenario>`. Listener wrappers
+  cannot run in test mode: check only that they call the `[S]` and wire every return path.
 - **Assert**: one Decision per check. False → Exception (`stopsingledoc="false"`, so the whole execution ends in
   ERROR) whose message shows expected and actual value (`{1}`).
 - **Expected values on the first run**: the first Decision that fails hides the actual values of the later checks.
   When the exact values are not known, add a temporary Notify at the start of path 3 that logs every value the
-  checks read, run once, check that the values are right, set them as expected, and remove the Notify.
+  checks read, run once, check that the values are right, set them as expected, and remove the Notify. A value
+  hidden behind a failure stays a guess: keep the Notify until it has been seen, and when it differs from the guess,
+  correct the expected value as a bug of the test and record it.
 - One scenario per `[UT]` process is the default.
 
 ## Switch the connections (only for the test)
@@ -201,8 +218,20 @@ deployed there that declares those fields extensible takes the environment value
 uses (for example the same environment for unit tests and for user acceptance tests, "collaudo"), switching a
 connection to a mock switches the other processes that use it as well. So, before the first deploy:
 
+**Gather every prerequisite question first.** The environment choice, the checks of the connector skills (libraries,
+policies) and any manual step for the user: collect them all and ask them together, before the first write to the
+account, so the user is interrupted once.
+
 Several of the calls below have no Companion script. Make them through `boomi_api` of the Companion's
 `scripts/boomi-common.sh` (`load_env`, `build_api_url`), **read-only** (queries and GETs); never write this way.
+Bodies that work (an empty `and` group is rejected with HTTP 400):
+
+| Call | Body |
+|---|---|
+| `POST Environment/query` | `{"QueryFilter":{"expression":{"operator":"LIKE","property":"name","argument":["%"]}}}` |
+| `POST EnvironmentAtomAttachment/query` | `{"QueryFilter":{"expression":{"operator":"EQUALS","property":"environmentId","argument":["<env id>"]}}}` |
+| `POST DeployedPackage/query` | `{"QueryFilter":{"expression":{"operator":"and","nestedExpression":[{"operator":"EQUALS","property":"environmentId","argument":["<env id>"]},{"operator":"EQUALS","property":"active","argument":["true"]}]}}}` |
+| `POST ComponentMetadata/query` (name of a component id) | `{"QueryFilter":{"expression":{"operator":"and","nestedExpression":[{"operator":"EQUALS","property":"componentId","argument":["<id>"]},{"operator":"EQUALS","property":"currentVersion","argument":["true"]}]}}}` |
 
 1. **Candidates**: list the environments of the account (`POST Environment/query`) and keep those classified `TEST`
    with a runtime attached (`POST EnvironmentAtomAttachment/query`). A `PROD` environment is never a candidate.
@@ -214,7 +243,8 @@ Several of the calls below have no Companion script. Make them through `boomi_ap
      a test value): someone uses it with a real system there;
    - the connection is deployed there in a process that is not a `[UT]`: the test values would switch it too.
      One call covers every environment: `POST ConnectionLicensingReport` (body `{}`, or a `QueryFilter` on
-     `environmentId`) returns a download `url`; `GET` it with the same credentials (retry while it is not ready) to
+     `environmentId`) returns a download `url` on `platform.boomi.com`, not on the API host; `GET` that URL as it is,
+     with the same credentials (retry while it is not ready), to
      get a CSV with one row per deployed connection and process: `ENVIRONMENT_ID`, `ENVIRONMENT_CLASS`,
      `CONTAINER_NAME`, `COMPONENT_ID` (the connection), `USED_IN_PROCESS_ID`, `USED_IN_PROCESS_NAME`. The connection
      is not in the CSV for that environment: no conflict. The first line of the CSV carries the report time, which
@@ -246,12 +276,16 @@ Several of the calls below have no Companion script. Make them through `boomi_ap
 4. **Long chain of sessions**: when more development-test-improvement rounds are expected (open work, the user said
    so, the feature is only partly built), ask the user before undeploying: keep the test deployments for the next
    session, or remove them now. Kept deployments are listed in the final answer, so the next session can clean them.
+   After an undeploy, the next session deploys the `[UT]`s again before running them (the extension values stay on
+   the environment; the declarations come back with the deploy).
 5. **Check**: query the active deployments of the environment again and compare them with the baseline.
 6. **Extension values stay**: the test values on the unit-test environment are not reverted (the next tests need
    them).
 7. **Final answer of the session**, always:
    - the extension values left: environment, connection, fields and values;
-   - every `[S]` changed, with its new version, and where the old version still runs (its release is the user's);
+   - every `[S]` and component changed, with its new version, the processes that bundle it (by name: `--related-to`
+     gives the ids, `ComponentMetadata/query` the names) and where the old version still runs (its release is the
+     user's);
    - the components to delete by hand (experiment processes): undeployed, but the scripts cannot delete components;
    - the `[UT]`s that are order-dependent or left red, and why.
 
@@ -283,8 +317,10 @@ Never move an issue to a state the interview reserved to people (for example "cl
 **The loop**, for each defect the user let the agent fix:
 
 1. **Fix** the `[S]` (Companion for the XML), push it, deploy it **only to the unit-test environment** (redeploy the
-   `[UT]`s that bundle it).
-2. **Run** its failing `[UT]`: it must turn green.
+   `[UT]`s that bundle it). When there are several ways to fix it, prefer the one that keeps the expectations of the
+   tests; when the fix itself changes an expected value, say so in the defect record.
+2. **Run** its failing `[UT]`: it must turn green. When it now fails on another check, that is the next defect
+   (hidden by this one, or new): record it, with the evidence from the log, and go on with the loop.
 3. **Add a non-regression `[UT]`** for the defect, when the failing test does not already pin it down:
    `[UT] <process> - regression <defect>` (with the issue key when there is one), the scenario that showed the defect.
 4. **Run all the `[UT]`s** of that `[S]` and of the processes that call it: a fix must not break another test.

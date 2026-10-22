@@ -84,6 +84,12 @@ Also note the connection of each operation: a connection shared with other proje
 folder) is more likely to be deployed in other processes of the unit-test environment, and a QUERY_ID on an operation
 shared with them changes their SQL too.
 
+**What the mock cannot see.** mockjdbc does not run the SQL: it returns the mock rows whatever the statement says,
+and captures only the bound parameters. Literals (`status = 'PAID'`), WHERE logic, joins, aggregates, ORDER BY and
+column lists are never checked by a test. So, during the inventory, **read every SQL against the spec of the `[S]`**:
+a mismatch is a defect "found by review" (`boomi-unit-testing`, "When the `[S]` must change"), recorded with the SQL
+line and the sentence of the spec it breaks.
+
 **Database V2 Standard Get**: its input document must hold only the `$` parameters of the query. With other fields
 the connector returns one empty document and no rows, without an error (Companion, Database V2 references), also
 against the real database: when the `[S]` sends a wider document, a `[UT]` that checks the rows finds a defect of the
