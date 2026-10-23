@@ -169,7 +169,10 @@ Start (No Data)
 - **A scenario where the `[S]` must fail**: an **application failure** (the `[S]` ends in an Exception by design,
   for example "Order not paid", a validation error, a record not found handled as an error) or a **technical
   failure** (an `SQLException` from the database, a connector error), when the connector skill gives a deterministic
-  way to cause it. Wrap the Process Call in a Try/Catch; the catch path stores `meta.base.catcherrorsmessage` in a
+  way to cause it. Some connectors return a technical error as a normal output document instead of an exception (for
+  example Database V2 with `returnApplicationErrors="true"`; the connector skill says when): then the `[UT]` checks
+  that document, or the route the `[S]` gives it, like any other output. Otherwise wrap the Process Call in a
+  Try/Catch; the catch path stores `meta.base.catcherrorsmessage` in a
   property (`PP_CAUGHT_MESSAGE`), and path 3 checks, each with a Decision that ends in an Exception:
   - **an exception was raised**: `PP_CAUGHT_MESSAGE` is not empty. Empty: the `[UT]` fails ("expected exception
     <expected message>, none raised"). A failure scenario that passes with no exception tests nothing;
