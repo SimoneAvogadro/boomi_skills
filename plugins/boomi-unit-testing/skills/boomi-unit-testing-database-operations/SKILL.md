@@ -88,7 +88,27 @@ shared with them changes their SQL too.
 and captures only the bound parameters. Literals (`status = 'PAID'`), WHERE logic, joins, aggregates, ORDER BY and
 column lists are never checked by a test. So, during the inventory, **read every SQL against the spec of the `[S]`**:
 a mismatch is a defect "found by review" (`boomi-unit-testing`, "When the `[S]` must change"), recorded with the SQL
-line and the sentence of the spec it breaks.
+line and the sentence of the spec it breaks. How much this review weighs depends on the situation
+(`boomi-unit-testing`, "Scope"):
+
+- **before the first DEV run**: the review is the only check of the SQL before DEV. Its findings go to the defect
+  list as "found by review", and the final answer lists what DEV must still verify (SQL text and semantics, real
+  types, constraints);
+- **after DEV**: a lighter review, since the SQL already ran against the real database.
+
+SQL validation (syntax, semantics against the real database) belongs to the DEV phase, not to the mock.
+
+**Failure paths of the database operations.** In the inventory, also list the technical failures the `[S]` handles
+around its database steps: a Try/Catch around a database step, an error route, a check of the connector's error
+output. Application failures that depend on the data are deterministic and are covered as usual: for example a
+header-only mock (no rows) for a "not found" that the `[S]` turns into an Exception. mockjdbc 2.2.0 has **no fault
+injection** (it is planned, in mockjdbc's FUTURE.md): it cannot make a statement throw an `SQLException` on demand.
+Cover a technical failure only when there is a deterministic way to cause it; otherwise report it as a **coverage
+gap** in the final answer ("technical failure paths not testable with the current mockjdbc"). Do not invent a
+mechanism. A stopgap, **to verify on a first run**: a malformed mock CSV (a row with a different number of values
+than the header) makes mockjdbc throw while the connector reads it; it reaches the `[S]` as a connector error, not as
+an `SQLException` with a SQLState, so it tests only a catch that does not look at the error type. Label such a
+`[UT]` as a stopgap, and keep the gap in the final answer for the checks it cannot make.
 
 **Database V2 Standard Get**: its input document must hold only the `$` parameters of the query. With other fields
 the connector returns one empty document and no rows, without an error (Companion, Database V2 references), also
@@ -286,3 +306,5 @@ date formats, Database V2 rules and troubleshooting: [mockjdbc-reference.md](moc
 | Old jar still on the runtime after a library upgrade | older driver behaviour (schema writes not captured, `prepareCall` failing) | check it, then ask the user: local Atom stop, delete old jars, start; cloud runtime (no restart, no delete): another runtime, a QUERY_ID or a step key |
 | Database V2 Standard Get fed with the whole input document | one empty document, no rows, no error | the input holds only the `$` parameters of the query |
 | Wrong N for `mockjdbc_##stepN` | a read returns no rows, or the write is not captured | confirm N with a first run (Notify on `##step0_params`, `##step1_params`...) |
+| A failure case not tested: a `[UT]` that expects an exception passes when no exception is raised | the error path of the `[S]` is never proved | Decision "exception raised?" then the expected message, as in `boomi-unit-testing`; check that no write was captured |
+| A technical database failure simulated with a mechanism mockjdbc does not have | the `[UT]` tests nothing, or tests something else | no fault injection in 2.2.0: report it as a coverage gap (malformed CSV only as a labelled stopgap) |

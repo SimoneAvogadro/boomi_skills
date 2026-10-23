@@ -49,6 +49,26 @@ From the lowest priority to the highest:
 
 Level 3 starts only after level 2 is complete, and only if the user agrees.
 
+## Scope: unit tests, and testing in DEV
+
+This skill covers **unit testing** only. The goal of a unit test is to make the execution of the `[S]` repeatable
+and deterministic: same inputs, same mocks, same result at every run. Validating the SQL against the real database,
+and everything else that only a real system can check, is the job of the DEV phase, not of the unit tests or of the
+mocks.
+
+Unit testing and testing in DEV are two separate phases, with different implications and handling. Find out which
+situation applies, from the request and the workspace; when it is not clear, ask the user with AskUserQuestion,
+together with the prerequisite questions:
+
+| Situation | What the unit tests do | What stays open |
+|---|---|---|
+| **Processes already tested in DEV** (against the real systems) | capture the behaviour known to be right: the DEV runs are the reference, expected values can come from what DEV showed | little: the SQL has already met the real database |
+| **Self-contained unit tests written before the first DEV run** | make the logic repeatable and deterministic | everything only a real system can check (SQL text and semantics, real types, constraints, connection settings) stays unverified until DEV: say so in the final answer |
+
+In a full-agentic workflow the agent does all the work, following the user's indications, but this skill explains
+only how to do unit testing. Whether and how to test in DEV is for the agent to agree with the user, outside this
+skill.
+
 ## Arrange, Act, Assert
 
 The `[UT]` follows the **Arrange-Act-Assert** pattern of unit testing (Bill Wake, 2001; the same idea as
@@ -146,11 +166,32 @@ Start (No Data)
   `PP_RETURNED_<PATH>` = `Y` (and the fields to check into `PP_ACTUAL_*`), and in path 3 a Decision per path ("the
   expected path returned? the others did not?") ending in an Exception. Otherwise an empty or broken response makes the
   shape that reads its fields fail in path 2 with a generic error, and the checks of path 3 never run.
-- **A scenario where the `[S]` must fail** (it ends in an Exception by design, for example "Order not paid"): wrap
-  the Process Call in a Try/Catch; the catch path stores `meta.base.catcherrorsmessage` in a property, and path 3
-  checks it (Decision with a wildcard or regex on the expected message) and checks that no write happened. The
-  Exception of the `[S]` is caught by the `[UT]`'s Try/Catch also with `abort="true"`. Without the Try/Catch the
-  expected error turns the test red.
+- **A scenario where the `[S]` must fail**: an **application failure** (the `[S]` ends in an Exception by design,
+  for example "Order not paid", a validation error, a record not found handled as an error) or a **technical
+  failure** (an `SQLException` from the database, a connector error), when the connector skill gives a deterministic
+  way to cause it. Wrap the Process Call in a Try/Catch; the catch path stores `meta.base.catcherrorsmessage` in a
+  property (`PP_CAUGHT_MESSAGE`), and path 3 checks, each with a Decision that ends in an Exception:
+  - **an exception was raised**: `PP_CAUGHT_MESSAGE` is not empty. Empty: the `[UT]` fails ("expected exception
+    <expected message>, none raised"). A failure scenario that passes with no exception tests nothing;
+  - **it is the expected one**: a wildcard or regex on the expected message (and on the type of error, when the
+    message carries it). Another message: the `[UT]` fails ("expected <expected message> got {1}");
+  - **no unexpected side effect**: no write captured by the mocks, no return path of the `[S]` taken that the
+    scenario excludes.
+
+  The Exception of the `[S]` is caught by the `[UT]`'s Try/Catch also with `abort="true"`. Without the Try/Catch the
+  expected error turns the test red. Do not put the "none raised" Exception on the try path after the Process Call:
+  the same Try/Catch would catch it.
+
+  ```
+  2 Act:     Message "Input ..." → Try/Catch
+             ├ Try   → Process Call "[S] ..." → Stop (continue)
+             └ Catch → Set Properties PP_CAUGHT_MESSAGE = meta.base.catcherrorsmessage → Stop (continue)
+  3 Assert:  Decision "exception raised?"  (PP_CAUGHT_MESSAGE not empty)
+             ├ false → Exception "expected exception <message>, none raised"
+             └ true  → Decision "expected exception?"  (PP_CAUGHT_MESSAGE matches *<message>*)
+                       ├ false → Exception "expected <message> got {1}"
+                       └ true  → Decision "no write?" ... → Stop (continue)
+  ```
 - **A caller with no `[S]` prefix** (a batch process with a "No Data" start that calls the `[S]`): it can be tested
   the same way, with a Process Call from the `[UT]`, named `[UT] <caller name> - <scenario>`. Listener wrappers
   cannot run in test mode: check only that they call the `[S]` and wire every return path.
@@ -189,9 +230,17 @@ Start (No Data)
 
 Level 2: build and run until the set of tests is complete. Iterate:
 
-1. **Coverage**: for every `[S]` in scope, list what its tests must cover: every path of its Decision, Route and
-   Branch shapes, every connector operation (each read with data and with no data, each write checked), the error
-   paths (Try/Catch, Exception), and what the `[S]` returns. Plan one `[UT]` per scenario until the list is covered.
+1. **Coverage**: for every `[S]` in scope, list what its tests must cover, **happy flows and failure flows**: every
+   path of its Decision, Route and Branch shapes, every connector operation (each read with data and with no data,
+   each write checked), what the `[S]` returns, and the failure paths:
+   - **application failures**: every Exception the `[S]` raises on purpose (validation, "Order not paid", not found
+     handled as an error);
+   - **technical failures**: every error the `[S]` handles from a connector (Try/Catch around a connector step, error
+     routes), for example an `SQLException` or a connection error.
+
+   Each failure is a `[UT]` as in "A scenario where the `[S]` must fail". A technical failure that the connector skill
+   gives no deterministic way to cause is a **coverage gap**: list it in the final answer, do not invent a mechanism.
+   Plan one `[UT]` per scenario until the list is covered.
 2. **Build and run** the `[UT]`s, all of them, on the unit-test environment.
 3. **Classify every failure**:
    - **bug in the test** (wrong mock data, wrong expected value, a check on the wrong key): fix the `[UT]`, run it
@@ -219,7 +268,8 @@ uses (for example the same environment for unit tests and for user acceptance te
 connection to a mock switches the other processes that use it as well. So, before the first deploy:
 
 **Gather every prerequisite question first.** The environment choice, the checks of the connector skills (libraries,
-policies) and any manual step for the user: collect them all and ask them together, before the first write to the
+policies), whether the processes were already tested in DEV (when it is not clear, see "Scope") and any manual step
+for the user: collect them all and ask them together, before the first write to the
 account, so the user is interrupted once.
 
 Several of the calls below have no Companion script. Make them through `boomi_api` of the Companion's
@@ -287,7 +337,11 @@ Bodies that work (an empty `and` group is rejected with HTTP 400):
      gives the ids, `ComponentMetadata/query` the names) and where the old version still runs (its release is the
      user's);
    - the components to delete by hand (experiment processes): undeployed, but the scripts cannot delete components;
-   - the `[UT]`s that are order-dependent or left red, and why.
+   - the `[UT]`s that are order-dependent or left red, and why;
+   - the coverage gaps: the failure paths with no `[UT]` (for example technical failures that the mock cannot
+     cause), and why;
+   - for unit tests written before the first DEV run: what DEV must still verify (SQL text and semantics, real types,
+     constraints, connection settings), with the findings "found by review".
 
 ## Fixing the processes (level 3)
 
@@ -357,3 +411,7 @@ issue), the defects not fixed (why, what is needed from the user), and the items
 | A bug tracker proposed with no connector or MCP for it in the session | the agent cannot keep it updated | propose it only when a tool for it is available |
 | Issue left in its first state after the fix, or with no comment | the tracker no longer tells the truth | move it through the workflow and comment the fix, or why it could not be fixed |
 | A fix verified only by its own `[UT]` | it can break another path of the `[S]` or a caller | run all the `[UT]`s of the `[S]` and of its callers |
+| Only happy flows tested | the Exceptions and error paths of the `[S]` are never run | coverage of application and technical failures; a gap that cannot be tested goes in the final answer |
+| A `[UT]` that expects an exception passes when none is raised, or when another one is raised | the failure path is not tested, the test is green by chance | Decision "exception raised?" and Decision on the expected message, each ending in an Exception |
+| "None raised" Exception on the try path after the Process Call | the `[UT]`'s own Try/Catch catches it | set `PP_CAUGHT_MESSAGE` in the catch path, check it in path 3 |
+| Unit tests written before DEV reported as a validation of the SQL | the user believes the SQL met the real database | say what DEV must still verify; SQL validation belongs to DEV |
