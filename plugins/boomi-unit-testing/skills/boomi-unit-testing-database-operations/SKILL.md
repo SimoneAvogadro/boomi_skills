@@ -29,13 +29,21 @@ changes type. User name and password stay those of the real connection: mockjdbc
 `ConnectionOverride` blocks to copy into the `[UT]` (Legacy with `xpath`, Database V2 without) are in
 [mockjdbc-reference.md](mockjdbc-reference.md#extension-declarations).
 
+**Database V2 with connection pooling**: with pooling on, test-on-borrow and no validation query, the pool asks
+mockjdbc `isValid()`, which answers false, and no connection can be borrowed ("isValid() returned false"). When the
+connection has pooling on, also extend `enablePooling` = `false`, or `validationQuery` = `SELECT 1` (found by reading
+the connector code: verify on the first run).
+
 **REQUIRED:** `boomi-unit-testing` for the strategy this skill plugs into: the `[UT]` process, the question before any
 change to the `[S]`, how extensions are declared, set and checked, the unit-test environment and the cleanup.
 This skill gives the database part of the test; the rest of the `[UT]` is built as that skill says.
 
 Priority: Boomi Companion < these skills < project or customer skills (see `boomi-unit-testing`, "Which skill wins").
 
-The rules below are those of mockjdbc **2.2.0**.
+The rules below are those of mockjdbc **2.2.0**, with the Legacy connector 20.03.0 and Database V2 0.0.73
+(effective version 64). The connector behaviour under the mock comes from static analysis of those connector versions
+(2026-10-23): recheck it when the connector changes
+([mockjdbc-reference.md](mockjdbc-reference.md#connector-behaviour-under-the-mock)).
 
 ## Prerequisite: the mockjdbc Custom Library
 
@@ -109,6 +117,18 @@ mechanism. A stopgap, **to verify on a first run**: a malformed mock CSV (a row 
 than the header) makes mockjdbc throw while the connector reads it; it reaches the `[S]` as a connector error, not as
 an `SQLException` with a SQLState, so it tests only a catch that does not look at the error type. Label such a
 `[UT]` as a stopgap, and keep the gap in the final answer for the checks it cannot make.
+
+What a database error does depends on the connector, so the `[UT]` checks a different outcome:
+
+- **Legacy**: an error in a write (insert, update, delete, stored procedure write) fails **only that document**,
+  after a rollback of its uncommitted rows; the other documents go on. An error in a Get fails the whole connector call.
+- **Database V2**: an error on one document becomes an application error (status code = the SQL error code, payload
+  `{"errorCode": <int>, "errorMessage": "<msg>"}`). With `returnApplicationErrors="true"` on the operation (the
+  Companion's default) it is a **normal output document** of the connector, not an Exception: the `[UT]` checks the
+  error document the `[S]` receives or routes (or the error path it takes), not only a caught Exception. With
+  `false` the document fails (a Try/Catch catches it). An error outside the per-document loop (connection, metadata)
+  fails all documents. The errors a test can cause today are the connector's own (error 405 for the IN clause option)
+  and those driven by the data.
 
 **Database V2 Standard Get**: its input document must hold only the `$` parameters of the query. With other fields
 the connector returns one empty document and no rows, without an error (Companion, Database V2 references), also
@@ -196,7 +216,11 @@ With keys 3 and 4 the `[UT]` says so in the label of the Set Properties or Decis
 and the answer to the user says that the test must be reviewed when the order of the `[S]` changes.
 
 Database V2 reads the metadata of a written table **by table name** whatever the key: the header-only mock of a
-written table is `mockjdbc_<table>` in every case (see reference).
+written table is `mockjdbc_<table>` in every case (see reference). That header decides the binding: the connector
+binds each field with the setter of its `|type`, so give the header every field of the input document, typed as the
+captured value must be. A field with no column in the header is not an error for writes: Standard
+Insert/Update/Delete silently do not bind it and Dynamic Insert leaves it out of the column list; Standard Get throws
+"Keys Provided in Input Request is not matching the Request Profile".
 
 ## Stored procedures
 
@@ -303,6 +327,12 @@ date formats, Database V2 rules and troubleshooting: [mockjdbc-reference.md](moc
 | Write on `#tmp` / `@rows` / `[order details]`, keyed by table | not captured by name: `_params` stays empty | QUERY_ID (structured policy), or step key 4 |
 | Database V2 *Stored Procedure* that returns rows, IN values asserted on `_params` | always empty: without a signature the connector calls it with no parameters | assert the rows and their use; with OUT parameters, a signature named after the profile fields |
 | Database V2 insert into a table without mock header | NullPointerException in the connector | define `mockjdbc_orders` with the header (types included) |
+| Database V2 input field missing from the mock header | Standard Insert/Update/Delete do not bind it, Dynamic Insert leaves it out: `_params` lacks it, no error; Standard Get throws "Keys Provided ... not matching" | every field of the input document in the header, with its `\|type` |
+| Database V2 failure `[UT]` that only expects an Exception | with `returnApplicationErrors="true"` the error is a normal output document: "none raised" | check the error document (`errorCode`, `errorMessage`) the `[S]` receives or routes |
+| Database V2 connection with pooling, only `className` and `url` extended | "isValid() returned false": no connection | extend `enablePooling` = `false` or `validationQuery` = `SELECT 1` |
+| `[S]` logic on `"Rows Effected"` or `"Inserted Id"` (Database V2) tested with the default mock | always 1 row (0 only for an unrecognised table), `"Inserted Id"` always `[]` | "0 rows": step key `mockjdbc_##stepN` = `0`; logic on generated ids: coverage gap |
+| Legacy write with a CLOB or BLOB field asserted on that value | captured empty: mockjdbc ignores stream setters | assert the other fields; the CLOB/BLOB value is a coverage gap |
+| Legacy "Enable Batching" asserted as a batch | under the mock it runs row by row: the batch path is not exercised | assert the per-document captures; the batch itself is verified in DEV |
 | Old jar still on the runtime after a library upgrade | older driver behaviour (schema writes not captured, `prepareCall` failing) | check it, then ask the user: local Atom stop, delete old jars, start; cloud runtime (no restart, no delete): another runtime, a QUERY_ID or a step key |
 | Database V2 Standard Get fed with the whole input document | one empty document, no rows, no error | the input holds only the `$` parameters of the query |
 | Wrong N for `mockjdbc_##stepN` | a read returns no rows, or the write is not captured | confirm N with a first run (Notify on `##step0_params`, `##step1_params`...) |

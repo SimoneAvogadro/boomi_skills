@@ -9,6 +9,7 @@ mockjdbc 2.2.x; check the CHANGELOG of the repository when a newer version is in
 - Captured parameters (assertions)
 - CSV format
 - Database V2 connector
+- Connector behaviour under the mock
 - Extension declarations
 - Counters and several scenarios
 - Scripts
@@ -123,7 +124,8 @@ The connector reads the metadata (`getColumns`) before running operations it bui
 - **define every table the operation writes to or filters on**, even header only, by **table name** (also when
   the statement has a QUERY_ID: the metadata is read by table), e.g. `mockjdbc_orders` =
   `order_id|integer,customer_id,segment,amount|double` (types make numbers bound as numbers);
-- **every field of the input document must be a column of that header**, otherwise NullPointerException;
+- **every field of the input document must be a column of that header**: a missing table header gives a
+  NullPointerException; a missing column is not bound (see "Connector behaviour under the mock");
 - **a query with `IN (...)`** (also a subquery, `WHERE id NOT IN (SELECT ...)`) needs the IN clause option of the
   operation: without it the connector rejects the query before the driver sees it, with error 405 `Kindly select the
   IN clause check box only if Sql Query contains IN Clause !` (the output document holds the error). `NOT EXISTS
@@ -134,6 +136,55 @@ The connector reads the metadata (`getColumns`) before running operations it bui
 Overrides: the legacy connector always needs all three, Driver Type `Custom`, Class Name and Connection URL (never
 only Class Name and URL, see SKILL.md); Database V2 has no driver type, only `className` and `url`. The blocks to
 declare them are below.
+
+## Connector behaviour under the mock
+
+Source: decompiled connectors, Legacy `connector-database-20.03.0.jar` and Database V2 `connector-db-v2-0.0.73.jar`
+(effective version 64), 2026-10-23. Static analysis, not reproduced at run time unless said: recheck it when the
+connector changes.
+
+### Legacy
+
+- **CLOB and BLOB fields are captured empty**: the connector binds them with `setCharacterStream(int, Reader, int)`
+  and `setBinaryStream(int, InputStream, int)`, which mockjdbc 2.2.0 ignores. The other fields of the write are
+  captured; the CLOB/BLOB value cannot be asserted (planned in mockjdbc FUTURE.md).
+- **"Enable Batching" runs row by row**: batching needs `supportsBatchUpdates()` true, and mockjdbc returns false.
+  The batch path is not exercised; captures are per document, as without batching.
+- **Errors**: an `SQLException` in a Send (insert, update, delete, stored procedure write) fails only that document,
+  after `rollback()` of its uncommitted rows; the other documents go on. In a Get the whole connector call fails.
+
+### Database V2
+
+- **Errors**: an `SQLException` on one document becomes `APPLICATION_ERROR`, status code = the SQL error code,
+  payload `{"errorCode": <int>, "errorMessage": "<msg>"}`. With `returnApplicationErrors="true"` on the operation
+  (the default the Companion writes) it is a normal output document of the connector shape; otherwise the document
+  fails (a Try/Catch catches it). An error outside the per-document loop (connection, metadata) fails all documents.
+  The errors a test can cause are the connector's own (error 405 for the IN clause option) and those driven by the
+  data; mockjdbc 2.2.0 cannot inject an `SQLException`.
+- **Response fields**: `"Rows Effected"` (Standard/Dynamic Update, Delete, Upsert) is 1 for a recognised table, 0 when
+  the target is not recognised; a step resource `mockjdbc_##stepN` = `0` gives 0. `"Inserted Id"` (inserts) is always
+  `[]` (no generated keys). The connector never branches on 0 rows: this matters only when the `[S]` maps or decides
+  on these fields. Then the "0 rows" case needs the step key with `0`, and logic on generated ids cannot be tested.
+- **Binding from the mock header**: the connector chooses the setter from `getColumns`, that is from the `|type` of
+  the mock header (only `varchar`, `integer`, `bigint`, `double`, `decimal`, `boolean`, `date`, `time`, `timestamp`).
+  NVARCHAR, CLOB, BLOB and JSON columns are bound as the header type says, not as in production; the value is still
+  captured.
+- **Field of the input document with no column in the header**: Standard Insert/Update/Delete silently do not bind
+  it (the parameter index still moves on, so that `?` stays empty in `_params`); Dynamic Insert leaves it out of the
+  column list; Standard Get throws "Keys Provided in Input Request is not matching the Request Profile". A table with
+  no header at all gives a NullPointerException.
+- **Vendor branches skipped**: mockjdbc reports the product name "MockJDBC", so the connector always runs its generic
+  branch: no SQL Server `SCOPE_IDENTITY` / `FOR JSON`, no Oracle date binding, no MySQL/PostgreSQL upsert variants.
+  Vendor-specific behaviour is verified in DEV, not by the unit tests.
+- **Connection pooling**: with pooling enabled, test-on-borrow and no validation query, commons-dbcp2 calls
+  `isValid()`, which mockjdbc answers false: "isValid() returned false", no connection. In the `[UT]` extend
+  `enablePooling` = `false`, or `validationQuery` = `SELECT 1` (mockjdbc answers a `SELECT` without `FROM` with one
+  row). The fields `enablePooling`, `validationQuery`, `testOnBorrow` are in the Database V2 `ConnectionOverride`
+  field list. Found by reading the code: verify on a first run.
+
+### Dynamic Process Properties
+
+No documented size limit: the values live in memory, so very large mocks are bounded by the runtime memory.
 
 ## Extension declarations
 
@@ -165,7 +216,8 @@ Environment Extension values (`boomi-extensions.sh`): `driverId` = `custom`, `cl
 
 Environment Extension values: `className` = `me.avogadro.mockjdbc.MockJdbcDriver`, `url` = `any`. The GUI also adds an
 `<Extensions><ObjectDefinitions>` section with one `objectDefinition` per table the operations use; it is not needed
-for the override.
+for the override. A connection with pooling on also needs `enablePooling` or `validationQuery` in the block, declared
+the same way (see "Connector behaviour under the mock").
 
 Values in `_params` are the `toString()` of the bound objects, so they depend on how the connector binds each
 field: with `amount|double` in the header the connector binds a Double and `250` is captured as `250.0`.
@@ -199,7 +251,11 @@ Inside Boomi the driver is not registered in `DriverManager`: from a script use
 | Real database contacted / connection error | extensions not applied: field not extensible, Legacy override without `xpath`, Test Extensions not filled, wrong environment |
 | `ClassNotFoundException` for the driver | Custom Library not deployed on that runtime, or `aspectjrt` / `opencsv` missing |
 | Old behaviour after an upgrade | old jar still loaded (jar locking): ask the user; local Atom: stop, delete old jars, start; cloud runtime: cannot be restarted nor its jars deleted (SKILL.md, "The library is not what the runtime runs") |
-| NullPointerException in Database V2 | table header missing, or input field not in the header |
+| NullPointerException in Database V2 | table header missing |
+| Database V2 `_params` missing a field, no error | input field not in the header: Standard Insert/Update/Delete do not bind it, Dynamic Insert leaves it out |
+| Database V2 "Keys Provided in Input Request is not matching the Request Profile" | Standard Get with an input field not in the header |
+| Database V2 "isValid() returned false" | pooling on, no validation query: extend `enablePooling` = `false` or `validationQuery` = `SELECT 1` |
+| Legacy CLOB / BLOB value empty in `_params` | stream setters ignored by mockjdbc 2.2.0: not assertable |
 | `NumberFormatException` / date parse error | value does not match the getter: see CSV format |
 | `SQLException: Invalid QUERY_ID` | ID with spaces, `?`, `#` or `,`, or empty: one word, e.g. `ecommerce.orders-ws.insert-order` |
 | `-- QUERY_ID:` ignored | not on the first line |
