@@ -375,11 +375,16 @@ Never move an issue to a state the interview reserved to people (for example "cl
 
 1. **Fix** the `[S]` (Companion for the XML), push it, deploy it **only to the unit-test environment** (redeploy the
    `[UT]`s that bundle it). When there are several ways to fix it, prefer the one that keeps the expectations of the
-   tests; when the fix itself changes an expected value, say so in the defect record.
+   tests; when the fix itself changes an expected value, say so in the defect record. After the push, pull the
+   changed components again, so that the local XML carries the new version, and write that version in the defect
+   record: whoever resumes or reviews the work reads the version from the local files.
 2. **Run** its failing `[UT]`: it must turn green. When it now fails on another check, that is the next defect
    (hidden by this one, or new): record it, with the evidence from the log, and go on with the loop.
-3. **Add a non-regression `[UT]`** for the defect, when the failing test does not already pin it down:
-   `[UT] <process> - regression <defect>` (with the issue key when there is one), the scenario that showed the defect.
+3. **Non-regression `[UT]`**: a failing `[UT]` that already checks the corrected value is the non-regression test:
+   name it in the defect record, no new `[UT]`. Add `[UT] <process> - regression <defect>` (with the issue key when
+   there is one) only for what the existing set does not check: the scenario that showed the defect when no `[UT]`
+   had it, another boundary, another branch. A defect found by review that no mock can see has none: write
+   "non-regression: not possible with the mock, DEV" in the record.
 4. **Run all the `[UT]`s** of that `[S]` and of the processes that call it: a fix must not break another test.
 5. **Describe the fix** (what changed, which components, which versions, which tests prove it) in the issue of the
    tracker when there is one, and move it to the next state; otherwise in the defect list.
@@ -413,6 +418,8 @@ issue), the defects not fixed (why, what is needed from the user), and the items
 | Issues created in the bug tracker without asking | writes to an external system the user did not approve | ask first; with an existing project, interview the user on its standards |
 | A bug tracker proposed with no connector or MCP for it in the session | the agent cannot keep it updated | propose it only when a tool for it is available |
 | Issue left in its first state after the fix, or with no comment | the tracker no longer tells the truth | move it through the workflow and comment the fix, or why it could not be fixed |
+| A regression `[UT]` added for every defect, also when a scenario `[UT]` went from red to green on it | duplicated tests to maintain | the red-to-green `[UT]` is the non-regression test; a new one only for an unchecked variant |
+| Fix pushed, local files not pulled again | the local XML shows the old version: the next session or a reviewer reads a wrong version | pull after the push, version in the defect record |
 | A fix verified only by its own `[UT]` | it can break another path of the `[S]` or a caller | run all the `[UT]`s of the `[S]` and of its callers |
 | Only happy flows tested | the Exceptions and error paths of the `[S]` are never run | coverage of application and technical failures; a gap that cannot be tested goes in the final answer |
 | A `[UT]` that expects an exception passes when none is raised, or when another one is raised | the failure path is not tested, the test is green by chance | Decision "exception raised?" and Decision on the expected message, each ending in an Exception |

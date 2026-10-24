@@ -62,6 +62,13 @@ and wait for their confirmation; never upload jars or create the library yoursel
 again. Library found but not deployed there: `boomi-deploy.sh <pulled library XML>` (to the unit-test environment),
 then go on; it is part of the cleanup of `boomi-unit-testing`.
 
+**An older jar** is a request to the user (upgrade the library: manual, from the GUI), not a stop. Until the upgrade,
+go on with what the old jar does, and confirm each feature you rely on with a first run. Release 2.1.0, from the
+mockjdbc CHANGELOG: writes are captured only on table names made of letters (`crm_customers` is not named: step key 4
+or a QUERY_ID), the table of a SELECT is the word after the **last** `from`, quoted and schema-qualified names are not
+recognised, `prepareCall` returns `null` (no stored procedures); `-- QUERY_ID:` works. The final answer gives the jar
+version and lists the `[UT]`s made order-dependent by it, to review after the upgrade.
+
 **The library is not what the runtime runs.** After an upgrade of the library the runtime can keep loading the old
 jar (jar locking: the old file stays in `userlib` and on the classpath until the runtime is stopped and the file
 removed). Suspect it when the driver behaves like an older version: a schema-qualified write not captured under
@@ -105,6 +112,12 @@ line and the sentence of the spec it breaks. How much this review weighs depends
 - **after DEV**: a lighter review, since the SQL already ran against the real database.
 
 SQL validation (syntax, semantics against the real database) belongs to the DEV phase, not to the mock.
+
+Read the **order of the writes** too: when the spec puts two writes in sequence ("insert the refund, then update the
+order") and the `[S]` runs them in separate Branch paths (inside a Try/Catch, for example), the second does not
+depend on the first: it can run even when the first failed. The mock cannot fail a statement, so no test sees it: a
+defect "found by review" when the spec makes the second write depend on the first, otherwise a check for DEV in the
+final answer.
 
 **Failure paths of the database operations.** In the inventory, also list the technical failures the `[S]` handles
 around its database steps: a Try/Catch around a database step, an error route, a check of the connector's error
@@ -280,8 +293,13 @@ The example uses the table-name keys (policy `minimal-changes`, key 1). With a Q
   its writes are captured.
 - **Assert**: one Decision per expected write: first value Dynamic Process Property `mockjdbc_<key>_params`, Equal To,
   the expected parameters **comma-separated in the order of the `?`**. Each value is the `toString()` of what the
-  connector binds: a Double `250` is `250.0`, a date uses the mockjdbc date format (`17-May-12`). Same query run
-  several times: check `mockjdbc_<key>_params#1`, `#2`, ...
+  connector binds: a Double `250` is `250.0`, a BigDecimal of scale 2 is `250.00`, a date uses the mockjdbc date
+  format (`17-May-12`). Same query run several times: check `mockjdbc_<key>_params#1`, `#2`, ...
+- **Numbers in the expected value**: the spec gives a value (`50`), the capture gives its rendering (`50`, `50.0` or
+  `50.00`, by the type and scale the process binds). Write the expected string from the type the profile or the map
+  produces, and when the first run shows another rendering, check that it is numerically the spec value before
+  adopting it. A fix that changes the scale (a rounding to 2 decimals) changes the rendering: that is a change of the
+  expected value to declare in the defect record, not a new defect.
 - Several scenarios in one `[UT]` need `mockjdbc#RESET` between them.
 - **`_params` empty**: the process log does not show which properties the driver wrote. Add a temporary Notify in
   path 3 that logs every candidate key (`mockjdbc_<table>_params`, `mockjdbc_<schema>.<table>_params`, `#1`, the
@@ -335,6 +353,8 @@ date formats, Database V2 rules and troubleshooting: [mockjdbc-reference.md](moc
 | Legacy "Enable Batching" asserted as a batch | under the mock it runs row by row: the batch path is not exercised | assert the per-document captures; the batch itself is verified in DEV |
 | Old jar still on the runtime after a library upgrade | older driver behaviour (schema writes not captured, `prepareCall` failing) | check it, then ask the user: local Atom stop, delete old jars, start; cloud runtime (no restart, no delete): another runtime, a QUERY_ID or a step key |
 | Database V2 Standard Get fed with the whole input document | one empty document, no rows, no error | the input holds only the `$` parameters of the query |
+| Mockjdbc older than 2.2.0 treated as a stop, or used without checking | no tests at all, or writes silently not captured (`crm_customers` with 2.1.0) | ask for the upgrade and go on with the old jar's limits, confirmed by a first run; list the order-dependent `[UT]`s |
+| Numeric parameter expected as the spec writes it (`50`) | Decision false on `50.00`: runs spent adapting strings | expected rendering from the bound type; a different one checked numerically against the spec before adopting it |
 | Wrong N for `mockjdbc_##stepN` | a read returns no rows, or the write is not captured | confirm N with a first run (Notify on `##step0_params`, `##step1_params`...) |
 | A failure case not tested: a `[UT]` that expects an exception passes when no exception is raised | the error path of the `[S]` is never proved | Decision "exception raised?" then the expected message, as in `boomi-unit-testing`; check that no write was captured |
 | A technical database failure simulated with a mechanism mockjdbc does not have | the `[UT]` tests nothing, or tests something else | no fault injection in 2.2.0: report it as a coverage gap (malformed CSV only as a labelled stopgap) |
