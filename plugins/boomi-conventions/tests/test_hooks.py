@@ -27,6 +27,7 @@ class CheckNamesTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.cwd = self.dir.name
+        os.mkdir(os.path.join(self.cwd, "active-development"))
 
     def tearDown(self):
         self.dir.cleanup()
@@ -76,6 +77,21 @@ class CheckNamesTest(unittest.TestCase):
         with open(os.path.join(self.cwd, ".boomi-naming-allow"), "w", encoding="utf-8") as f:
             f.write("# agreed with team X\nDPP_SHARED\n")
         self.assertIsNone(self.write_call(process_xml("[S] X", prop="DPP_SHARED")))
+
+    def test_name_used_elsewhere_in_workspace_is_kept(self):
+        # a pulled parent sets DPP_ORDER_ID: a new [S] or [UT] that reads it must keep the name
+        os.mkdir(os.path.join(self.cwd, "active-development", "process"))
+        with open(os.path.join(self.cwd, "active-development", "process", "parent.xml"), "w", encoding="utf-8") as f:
+            f.write(process_xml("Orders listener", start="<noaction/>", prop="DPP_ORDER_ID"))
+        self.assertIsNone(self.write_call(process_xml("[S] Load orders", prop="DPP_ORDER_ID")))
+        self.assertIn("use PP_OTHER", self.reason(self.write_call(process_xml("[S] Load orders", prop="DPP_OTHER"))))
+
+    def test_outside_boomi_workspace_ignored(self):
+        os.rmdir(os.path.join(self.cwd, "active-development"))
+        self.assertIsNone(self.write_call(process_xml("Load orders", prop="DPP_X")))
+
+    def test_xml_that_is_not_a_component_ignored(self):
+        self.assertIsNone(self.write_call('<?xml version="1.0"?><config><key>DPP_X</key></config>', name="pom.xml"))
 
     def test_non_xml_and_other_commands_ignored(self):
         self.assertIsNone(self.write_call("DPP_X", name="notes.md"))

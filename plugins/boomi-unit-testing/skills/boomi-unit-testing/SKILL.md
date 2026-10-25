@@ -49,6 +49,13 @@ From the lowest priority to the highest:
 
 Level 3 starts only after level 2 is complete, and only if the user agrees.
 
+**An `[S]` the agent is building in this task** (new, or a change the user asked for) is not a delivered process: the
+agent develops it together with its tests, test-first if it likes, and fixes its own defects as soon as a `[UT]`
+shows them, with no question and no level 3. The levels, the defect list and the questions of "When the `[S]` must
+change" apply to the processes that exist before the task (delivered, or written by someone else), and to the parts
+of an `[S]` that the task does not change. The other rules hold for both: no test code in the `[S]`, deploys only on
+the unit-test environment, cleanup.
+
 ## Scope: unit tests, and testing in DEV
 
 This skill covers **unit testing** only. The goal of a unit test is to make the execution of the `[S]` repeatable
@@ -79,7 +86,8 @@ Given-When-Then in BDD): prepare the inputs and the mocks, run the code under te
 1. **The process under test is not changed by its test.** Wherever possible the `[S]` runs in the `[UT]` exactly as
    it runs in production: same XML, same shapes, same connectors. Test data, mocks and checks live in the `[UT]`.
    The `[S]` is changed only when the user explicitly picks option 1 or 2 of the question below, chose a policy that
-   asks for the change, or lets the agent fix the defects in level 3.
+   asks for the change, or lets the agent fix the defects in level 3, or when the agent is building that `[S]` in
+   this task (see "The agentic workflow").
 2. **Arrange and Assert are outside the `[S]`.** The `[UT]` prepares the mocks before the Process Call and checks what
    they captured after it.
 3. **Fidelity**: the only difference between production and test is the connections switched by extensions in the
@@ -277,6 +285,8 @@ account, so the user is interrupted once.
 
 Several of the calls below have no Companion script. Make them through `boomi_api` of the Companion's
 `scripts/boomi-common.sh` (`load_env`, `build_api_url`), **read-only** (queries and GETs); never write this way.
+These read-only calls are agreed by this skill: they do not need the Companion's "stop and discuss" before a custom
+call (that rule still holds for any other call, and for every write).
 Bodies that work (an empty `and` group is rejected with HTTP 400):
 
 | Call | Body |
@@ -285,6 +295,13 @@ Bodies that work (an empty `and` group is rejected with HTTP 400):
 | `POST EnvironmentAtomAttachment/query` | `{"QueryFilter":{"expression":{"operator":"EQUALS","property":"environmentId","argument":["<env id>"]}}}` |
 | `POST DeployedPackage/query` | `{"QueryFilter":{"expression":{"operator":"and","nestedExpression":[{"operator":"EQUALS","property":"environmentId","argument":["<env id>"]},{"operator":"EQUALS","property":"active","argument":["true"]}]}}}` |
 | `POST ComponentMetadata/query` (name of a component id) | `{"QueryFilter":{"expression":{"operator":"and","nestedExpression":[{"operator":"EQUALS","property":"componentId","argument":["<id>"]},{"operator":"EQUALS","property":"currentVersion","argument":["true"]}]}}}` |
+
+**Already chosen**: read `.boomi-unit-testing` in the workspace directory. A line
+`unit-test-environment=<environment id>` (written by an earlier session, or by the user) is the choice: do not list
+the candidates again and do not ask. Before the first deploy of the session, run only step 3 (conflicts) on that
+environment, for the connections of this session; a new conflict is the only reason to ask the user again. The same
+holds when the project's instructions (workspace `CLAUDE.md`, a project skill) name the unit-test environment: write
+it in `.boomi-unit-testing` and go on.
 
 1. **Candidates**: list the environments of the account (`POST Environment/query`) and keep those classified `TEST`
    with a runtime attached (`POST EnvironmentAtomAttachment/query`). A `PROD` environment is never a candidate.
@@ -310,7 +327,9 @@ Bodies that work (an empty `and` group is rejected with HTTP 400):
    (a free one recommended). Only one candidate, and it has conflicts (or none at all): **stop**, explain the
    conflict (which connection, which processes or values) and agree with the user how to go on, for example a new
    `TEST` environment with its own runtime (created by the user), or runs from the GUI with Test Extensions, which
-   apply to that run only. Never set test values on a connection with a conflict.
+   apply to that run only. Never set test values on a connection with a conflict. Write the choice in
+   `.boomi-unit-testing` (`unit-test-environment=<environment id>`, one `key=value` per line): the next sessions use
+   it without asking.
 5. The Companion scripts deploy and write extensions on `BOOMI_ENVIRONMENT_ID`: if the chosen environment is another
    one, ask the user to change it in the workspace `.env` (or to let the agent do it) before the first deploy.
 
@@ -353,18 +372,27 @@ unknown connector or platform behaviour, is the Companion's (`bc-integration:boo
 problem-solving guide).
 
 **Report and ask.** When level 2 is complete, report every defect of the defect list: `[S]`, failing `[UT]`, expected
-vs actual, cause, proposed fix and the components it touches. Then ask the user with AskUserQuestion:
+vs actual, cause, proposed fix and the components it touches. An answer already given counts: the request ("write the
+tests and fix what they find"), the project's instructions (workspace `CLAUDE.md`, a project skill) or
+`.boomi-unit-testing` (below). Report and go on as it says. Otherwise ask the user with AskUserQuestion:
 
 - **track them in a bug tracker?** Only when the session has one: look first at the connectors and MCP servers
   available (Jira, GitHub issues, Azure DevOps...). None: do not propose it, the defect list is the record. Create
   nothing before the yes: it is a write to an external system;
 - **may the agent fix them?** all of them, some of them, or none (the `[UT]`s stay red and document them).
 
-**A project that already has a tracker**: before the first issue, interview the user (AskUserQuestion, a few
-questions at a time) to fit its standards, and read a few existing issues to check the answers: project, issue type,
-mandatory fields, components and labels, title and description format, workflow states and their meaning, who is
-assignee and reporter, how a fix is linked (comment, field, link to a version), when an issue may be closed. Record the
-answers in `.boomi-unit-testing` (`tracker.*` lines) so the next sessions follow them without asking again.
+Record the answers in `.boomi-unit-testing`, so the next sessions do not ask again: `tracker=<tracker and
+project>` or `tracker=none`, and, when the user wants it as a rule and not only for this list,
+`fix-defects=all` (the agent fixes every defect it can) or `fix-defects=ask`. With those lines the agent reports the
+defects and goes on as they say; the user can change them at any time.
+
+**A project that already has a tracker**: before the first issue, fit its standards: project, issue type, mandatory
+fields, components and labels, title and description format, workflow states and their meaning, who is assignee and
+reporter, how a fix is linked (comment, field, link to a version), when an issue may be closed. Read first what the
+project already says (`CLAUDE.md`, project skills or docs, `tracker.*` lines in `.boomi-unit-testing`) and a few
+existing issues; then interview the user (AskUserQuestion, a few questions at a time) only on what is still missing
+or unclear. Record the answers in `.boomi-unit-testing` (`tracker.*` lines) so the next sessions follow them without
+asking again.
 
 **Keep the tracker up to date** for every issue: move it through the workflow as the work goes (for example "in
 progress" when the fix starts, "resolved" or the state the project uses when its tests are green), and comment the
@@ -414,7 +442,7 @@ issue), the defects not fixed (why, what is needed from the user), and the items
 | Fields of the `[S]` response read without checking it exists | path 2 fails with a generic error, path 3 never runs | Decision "response returned?" right after the Process Call |
 | A red `[UT]` "fixed" by changing the expected value | the defect of the `[S]` is hidden | prove the cause (experiment process), then the question with three options |
 | `[UT] [S] Scarica fatture - ...` | double prefix | `[UT] Scarica fatture - ...` |
-| A defect fixed during level 2 | the set of tests stays incomplete, the user never chose | record it and go on; fixes are level 3, after asking |
+| A defect of an existing `[S]` fixed during level 2 | the set of tests stays incomplete, the user never chose | record it and go on; fixes are level 3, after asking (an `[S]` the agent is building in this task is fixed at once) |
 | Issues created in the bug tracker without asking | writes to an external system the user did not approve | ask first; with an existing project, interview the user on its standards |
 | A bug tracker proposed with no connector or MCP for it in the session | the agent cannot keep it updated | propose it only when a tool for it is available |
 | Issue left in its first state after the fix, or with no comment | the tracker no longer tells the truth | move it through the workflow and comment the fix, or why it could not be fixed |

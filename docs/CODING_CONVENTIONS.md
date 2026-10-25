@@ -87,9 +87,13 @@ An agent can be told the rules in three ways, from the weakest to the strongest:
 | Workspace instructions (`CLAUDE.md`) | Instructions in `CLAUDE.md` take precedence over skills | Must be added to each Boomi workspace (or to the Companion workspace template) |
 | Plugin hooks (installed with the `boomi-conventions` plugin) | At session start, in a Boomi workspace, the agent is told that these conventions win. Before a Write/Edit of a component XML, or before `boomi-component-create.sh`, the call is refused when it introduces a `DPP_`/`DDP_` property or a passthrough subprocess without `[S] `; the agent gets the correct names and retries | Checks only what can be checked mechanically: `[UT]` names and the meaning of a name are left to the skill |
 
-The hooks only look at names **introduced** by a change: names already in a pulled component are accepted. A name
-that must stay as it is (for example `DPP_SHARED`, agreed with another team) goes in a file `.boomi-naming-allow` in
-the workspace directory, one name per line (`#` for comments).
+The hooks work only in a Boomi workspace (a directory with `active-development/`, or a `.env` with `BOOMI_`
+variables), and the naming check looks only at Boomi component XML files: other XML files and other projects are
+never checked. It looks only at names **introduced** by a change: names already in a pulled component, or used by any
+other component of the workspace, are accepted, so a new subprocess can read the `DPP_` properties of an existing
+process. A name that must stay as it is and is not in the workspace (for example `DPP_SHARED`, agreed with another
+team) goes in a file `.boomi-naming-allow` in the workspace directory, one name per line (`#` for comments); the agent
+adds it and tells the user.
 
 Suggested lines for the `CLAUDE.md` of a Boomi workspace (or of the Companion workspace template, see
 `/bc-integration:configure-template-workspace`):

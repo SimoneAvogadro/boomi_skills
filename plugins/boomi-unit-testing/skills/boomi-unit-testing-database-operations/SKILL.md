@@ -56,10 +56,12 @@ Before the first test on an environment, check (Companion scripts) that
 - it is deployed on the unit-test environment: `POST DeployedPackage/query` with `environmentId`, `componentId` of
   the library, `active` = `true` (the lookup of `boomi-undeploy.sh --by-component`; no read-only script).
 
-No such library: **stop**. Tell the user that uploading the jars and creating the library are manual (Boomi has no API
-to upload jars), point to https://github.com/SimoneAvogadro/mockjdbc/blob/master/FEATURES.md#setting-up-the-custom-library
-and wait for their confirmation; never upload jars or create the library yourself. After the confirmation check
-again. Library found but not deployed there: `boomi-deploy.sh <pulled library XML>` (to the unit-test environment),
+No such library: tell the user, together with the other prerequisite questions, that uploading the jars and creating
+the library are manual (Boomi has no API to upload jars), and point to
+https://github.com/SimoneAvogadro/mockjdbc/blob/master/FEATURES.md#setting-up-the-custom-library; never upload jars or
+create the library yourself. Meanwhile go on with everything that does not run a test: the inventory, the review of
+the SQL, the QUERY_ID policy, building and pushing the `[UT]`s with their extension declarations. Only deploying and
+running the `[UT]`s wait for the user's confirmation; after it, check again. Library found but not deployed there: `boomi-deploy.sh <pulled library XML>` (to the unit-test environment),
 then go on; it is part of the cleanup of `boomi-unit-testing`.
 
 **An older jar** is a request to the user (upgrade the library: manual, from the GUI), not a stop. Until the upgrade,

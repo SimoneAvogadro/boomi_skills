@@ -75,10 +75,15 @@ Companion patterns translate directly: `DPP_FROM_WRAPPER` becomes `PP_FROM_WRAPP
 
 ## The naming guard
 
-The plugin's hook refuses a Write/Edit of a component XML (or a `boomi-component-create.sh`) that introduces a
-`DPP_` / `DDP_` property or a passthrough subprocess without `[S] `. When it does, rename as the message says, in
-every occurrence, and retry. Add a name to `.boomi-naming-allow` (workspace directory, one per line) only when the user
-explicitly asks to keep it.
+The plugin's hook works only in a Boomi workspace (`active-development/`, or a `.env` with `BOOMI_` variables) and
+only on Boomi component XML files: other XML files (Maven, configuration...) and other directories are never
+checked. It refuses a Write/Edit of a component XML (or a `boomi-component-create.sh`) that introduces a `DPP_` /
+`DDP_` property or a passthrough subprocess without `[S] `. A `DPP_` / `DDP_` name already used by a component of the
+workspace is not new: a new `[S]` or `[UT]` can read or set the properties of the existing processes as they are.
+
+When it refuses, rename as the message says, in every occurrence, and retry. A name fixed outside the workspace (set
+or read by a process that is not pulled here, agreed with another team, read by a library) must keep its spelling: add
+it to `.boomi-naming-allow` (workspace directory, one per line), retry, and tell the user which names you added.
 
 ## Check before push
 

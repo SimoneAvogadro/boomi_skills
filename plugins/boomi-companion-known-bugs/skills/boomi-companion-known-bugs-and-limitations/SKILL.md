@@ -69,14 +69,16 @@ Companion text (until a check shows the fix).
 ### CL-2. No script for environment and deployment queries
 
 - **Seen in**: 1.0.87. **Last checked**: 1.0.87 (2026-10-23).
-- **Limitation**: no script lists environments, runtime attachments, active deployments of an environment, or the
+- **Limitation**: `boomi-deploy.sh --list-environments` lists only the name and id of each environment, not its
+  classification (`TEST` / `PROD`); no script lists runtime attachments, active deployments of an environment, or the
   connection licensing report; the Companion asks to stop and discuss before crafting custom calls.
 - **Workaround**: read-only calls through `boomi_api` (never writes). Bodies that work: `POST Environment/query` with
   `{"QueryFilter":{"expression":{"operator":"LIKE","property":"name","argument":["%"]}}}`;
   `POST DeployedPackage/query` with an `and` of `environmentId` and `active` = `true` (an empty `and` group is rejected
   with HTTP 400). `POST ConnectionLicensingReport` returns a download `url` on `platform.boomi.com`: `GET` it as it
   is, with the same credentials.
-- **Check**: `ls <companion skill dir>/scripts/` shows a script for these queries → fixed.
+- **Check**: `ls <companion skill dir>/scripts/` shows a script for these queries, or `--list-environments` prints
+  the classification → fixed.
 
 ### CL-3. Components cannot be deleted by script
 
