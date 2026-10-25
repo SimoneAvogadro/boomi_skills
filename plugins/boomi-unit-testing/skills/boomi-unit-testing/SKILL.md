@@ -37,6 +37,14 @@ From the lowest priority to the highest:
 3. **Project or customer skills** (and the workspace `CLAUDE.md`): when one covers the same topic (naming, a unit-test
    strategy agreed by contract...), it wins over everything else.
 
+## Talking to the user
+
+The user is a Boomi specialist who knows the process under test: write for them. Short, focused messages: the
+decision to take, the finding with its evidence, the state of the account (what was deployed, which environment
+`.env` points to, what changed); no Boomi basics, no restating of the process, no narration of the steps done.
+A question carries the trade-off and the options, nothing more; a report carries what changed on the account and
+what the user must do next.
+
 ## The agentic workflow: three levels
 
 1. **Build the unit tests**: one `[UT]` per scenario, with the connector skills (sections from "Principles" to "Switch
@@ -278,16 +286,30 @@ deployed there that declares those fields extensible takes the environment value
 uses (for example the same environment for unit tests and for user acceptance tests, "collaudo"), switching a
 connection to a mock switches the other processes that use it as well. So, before the first deploy:
 
-**Gather every prerequisite question first.** The environment choice, the checks of the connector skills (libraries,
-policies), whether the processes were already tested in DEV (when it is not clear, see "Scope") and any manual step
-for the user: collect them all and ask them together, before the first write to the
-account, so the user is interrupted once.
+**Gather every prerequisite question first.** The environment choice (opening with the environment that
+`BOOMI_ENVIRONMENT_ID` in the workspace `.env` points to now, id and name: every Companion deploy and extension write
+goes there), the checks of the connector skills (libraries, policies), whether the processes were already tested in
+DEV (when it is not clear, see "Scope") and any manual step for the user: collect them all and ask them together,
+before the first write to the account, so the user is interrupted once.
 
 Several of the calls below have no Companion script. Make them through `boomi_api` of the Companion's
-`scripts/boomi-common.sh` (`load_env`, `build_api_url`), **read-only** (queries and GETs); never write this way.
+`scripts/boomi-common.sh`, **read-only** (queries and GETs); never write this way, and never write a `curl` of your
+own: the auth header has a format of its own, and repeated auth errors lock the API user out of the platform.
 These read-only calls are agreed by this skill: they do not need the Companion's "stop and discuss" before a custom
-call (that rule still holds for any other call, and for every write).
-Bodies that work (an empty `and` group is rejected with HTTP 400):
+call (that rule still holds for any other call, and for every write). The one shape to use, from the workspace
+directory (`load_env` reads `./.env`):
+
+```bash
+source "<skill-path>/scripts/boomi-common.sh"; load_env
+boomi_api -X POST "$(build_api_url 'Environment/query')" \
+  -H "Accept: application/json" -H "Content-Type: application/json" -d '<body>'
+echo "$RESPONSE_CODE"; echo "$RESPONSE_BODY"
+# a GET:      boomi_api "$(build_api_url 'EnvironmentExtensions/<env id>')" -H "Accept: application/json"
+# a full URL (the licensing report download): boomi_api "<url>" -H "Accept: text/csv"
+```
+
+**One auth error (HTTP 401 or 403) stops the work**: do not retry, do not touch the credentials or the header, tell
+the user and wait. Bodies that work (an empty `and` group is rejected with HTTP 400):
 
 | Call | Body |
 |---|---|
@@ -330,8 +352,11 @@ it in `.boomi-unit-testing` and go on.
    apply to that run only. Never set test values on a connection with a conflict. Write the choice in
    `.boomi-unit-testing` (`unit-test-environment=<environment id>`, one `key=value` per line): the next sessions use
    it without asking.
-5. The Companion scripts deploy and write extensions on `BOOMI_ENVIRONMENT_ID`: if the chosen environment is another
-   one, ask the user to change it in the workspace `.env` (or to let the agent do it) before the first deploy.
+5. The Companion scripts deploy and write extensions on `BOOMI_ENVIRONMENT_ID` of the workspace `.env`. If the chosen
+   environment is another one, ask the user (AskUserQuestion) before changing it, whether they do it or the agent
+   does, and say what it implies: until it is put back, every script run in the workspace deploys and writes
+   extensions on the unit-test environment. Record the original in `.boomi-unit-testing`
+   (`original-environment=<environment id>`): the cleanup restores it.
 
 ### Cleanup
 
@@ -353,7 +378,11 @@ it in `.boomi-unit-testing` and go on.
 5. **Check**: query the active deployments of the environment again and compare them with the baseline.
 6. **Extension values stay**: the test values on the unit-test environment are not reverted (the next tests need
    them).
-7. **Final answer of the session**, always:
+7. **`.env` back to the original**: when `BOOMI_ENVIRONMENT_ID` was changed for the tests (`original-environment` in
+   `.boomi-unit-testing`), put the original value back at the end of the session, also when the deployments are kept
+   (step 4: the next session changes it again before running), and tell the user it was restored.
+8. **Final answer of the session**, always:
+   - the environment `.env` points to now, and whether it was changed and restored during the session;
    - the extension values left: environment, connection, fields and values;
    - every `[S]` and component changed, with its new version, the processes that bundle it (by name: `--related-to`
      gives the ids, `ComponentMetadata/query` the names) and where the old version still runs (its release is the
@@ -439,6 +468,8 @@ issue), the defects not fixed (why, what is needed from the user), and the items
 | Test "passes" by reading Notify output | needs a human, not repeatable | Decision + Exception |
 | Extension field without `xpath` on a connector with its own settings (Database Legacy...) | the real system is used | copy the block from the connector skill or a pulled component (SDK connectors such as Database V2 have no `xpath`: that is fine) |
 | Test values set on an environment shared with other processes | those processes switch to the mock too | choose the unit-test environment first (prerequisite) |
+| `BOOMI_ENVIRONMENT_ID` changed in `.env` for the tests and left there, or changed without asking | the user's next deploys and extension writes go to the unit-test environment | say which environment `.env` points to, ask before changing it, restore it in the cleanup and say so |
+| A `curl` written by hand for a query the scripts do not cover | a wrong auth header, repeated, locks the API user out | `boomi_api` of `boomi-common.sh` as in "Prerequisite"; one auth error: stop and tell the user |
 | Fields of the `[S]` response read without checking it exists | path 2 fails with a generic error, path 3 never runs | Decision "response returned?" right after the Process Call |
 | A red `[UT]` "fixed" by changing the expected value | the defect of the `[S]` is hidden | prove the cause (experiment process), then the question with three options |
 | `[UT] [S] Scarica fatture - ...` | double prefix | `[UT] Scarica fatture - ...` |
