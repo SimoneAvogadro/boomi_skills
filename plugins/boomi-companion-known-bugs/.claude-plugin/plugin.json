@@ -1,0 +1,14 @@
+{
+  "name": "boomi-companion-known-bugs",
+  "description": "Known bugs and limitations of specific Boomi Companion versions, with corrections and checks to tell when a release fixes them",
+  "version": "0.1.0",
+  "author": {
+    "name": "Simone Avogadro"
+  },
+  "license": "CC-BY-SA-4.0",
+  "keywords": [
+    "boomi",
+    "companion",
+    "known-issues"
+  ]
+}

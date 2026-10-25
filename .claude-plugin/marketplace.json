@@ -14,8 +14,13 @@
     },
     {
       "name": "boomi-unit-testing",
-      "description": "Unit testing Boomi processes inside Boomi: [UT] test processes, database mocked with mockjdbc, assertions on the expected DB writes",
+      "description": "Unit testing Boomi processes inside Boomi: [UT] test processes on an unchanged process under test, plus connector mocks (database operations with mockjdbc)",
       "source": "./plugins/boomi-unit-testing"
+    },
+    {
+      "name": "boomi-companion-known-bugs",
+      "description": "Known bugs and limitations of specific Boomi Companion versions, with corrections and a check for each one",
+      "source": "./plugins/boomi-companion-known-bugs"
     }
   ]
 }

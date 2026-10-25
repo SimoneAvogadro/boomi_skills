@@ -35,7 +35,7 @@ The prefix is part of the name, so it appears wherever the name does: the proper
 | Kind of process | Name | Example |
 |---|---|---|
 | Subprocess: Data Passthrough start, called with a Process Call | `[S] ` + name | `[S] Load customer orders` |
-| Unit test process: exists only to test another process | `[UT] ` + name of the tested process + scenario | `[UT] Load customer orders - inserts order` |
+| Unit test process: exists only to test another process | `[UT] ` + name of the tested process without its `[S] ` prefix + scenario | `[UT] Load customer orders - inserts order` (tests `[S] Load customer orders`) |
 | Main process: listener, scheduled, started by hand | name without prefix | `Orders JMS listener` |
 
 **Why.** In the component explorer and in the Process Call picker the prefix separates what can be deployed and
@@ -55,7 +55,7 @@ processes, which is where it is read.
 the folder holds. The suffix is used only when there is more than one, so the common case stays short.
 
 A listener exposes its logic through a thin wrapper: the listener process (no prefix) only receives the message and
-calls the `[S]` that does the work, so the logic can be tested (see the `boomi-unit-testing` skill).
+calls the `[S]` that does the work, so the logic can be tested on its own.
 
 ## 3. Names that are not renamed
 
@@ -73,6 +73,10 @@ its documentation and examples use `DPP_` and `DDP_` and give no rule for proces
 only the naming: everything else in the Companion stays valid. When an example from the Companion is reused, its
 names are translated (`DPP_FROM_WRAPPER` → `PP_FROM_WRAPPER`).
 
+The order of priority, from the lowest to the highest: the Boomi Companion (the same for everyone who uses Boomi),
+these conventions, and a project or customer skill (or the workspace `CLAUDE.md`) with its own conventions, which wins
+over both.
+
 ## 5. How the conventions are enforced
 
 An agent can be told the rules in three ways, from the weakest to the strongest:
@@ -83,9 +87,13 @@ An agent can be told the rules in three ways, from the weakest to the strongest:
 | Workspace instructions (`CLAUDE.md`) | Instructions in `CLAUDE.md` take precedence over skills | Must be added to each Boomi workspace (or to the Companion workspace template) |
 | Plugin hooks (installed with the `boomi-conventions` plugin) | At session start, in a Boomi workspace, the agent is told that these conventions win. Before a Write/Edit of a component XML, or before `boomi-component-create.sh`, the call is refused when it introduces a `DPP_`/`DDP_` property or a passthrough subprocess without `[S] `; the agent gets the correct names and retries | Checks only what can be checked mechanically: `[UT]` names and the meaning of a name are left to the skill |
 
-The hooks only look at names **introduced** by a change: names already in a pulled component are accepted. A name
-that must stay as it is (for example `DPP_SHARED`, agreed with another team) goes in a file `.boomi-naming-allow` in
-the workspace directory, one name per line (`#` for comments).
+The hooks work only in a Boomi workspace (a directory with `active-development/`, or a `.env` with `BOOMI_`
+variables), and the naming check looks only at Boomi component XML files: other XML files and other projects are
+never checked. It looks only at names **introduced** by a change: names already in a pulled component, or used by any
+other component of the workspace, are accepted, so a new subprocess can read the `DPP_` properties of an existing
+process. A name that must stay as it is and is not in the workspace (for example `DPP_SHARED`, agreed with another
+team) goes in a file `.boomi-naming-allow` in the workspace directory, one name per line (`#` for comments); the agent
+adds it and tells the user.
 
 Suggested lines for the `CLAUDE.md` of a Boomi workspace (or of the Companion workspace template, see
 `/bc-integration:configure-template-workspace`):

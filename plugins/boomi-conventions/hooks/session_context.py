@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SessionStart hook: in a Boomi workspace, state that the user's naming conventions win.
+"""SessionStart hook: in a Boomi workspace, state that the plugin's naming conventions win over the Companion's.
 
 A directory is a Boomi workspace when it has active-development/ (Boomi Companion layout) or a
 .env that defines BOOMI_ variables. Elsewhere the hook prints nothing.
@@ -9,11 +9,13 @@ import os
 import sys
 
 CONTEXT = (
-    "Boomi naming conventions of this user (skill boomi-conventions:boomi-coding-conventions) take "
-    "precedence over the naming used in the bc-integration:boomi-integration references and examples: "
+    "The Boomi naming conventions of the boomi-conventions plugin (skill "
+    "boomi-conventions:boomi-coding-conventions) take precedence over the naming used in the "
+    "bc-integration:boomi-integration references and examples: "
     "PP_ for dynamic process properties (not DPP_), D_ for dynamic document properties (not DDP_), "
     "'[S] ' prefix for subprocesses, '[UT] ' prefix for unit test processes. Load that skill before "
-    "creating or renaming Boomi components."
+    "creating or renaming Boomi components. A project or customer skill (or the workspace CLAUDE.md) with "
+    "its own conventions wins over these."
 )
 
 

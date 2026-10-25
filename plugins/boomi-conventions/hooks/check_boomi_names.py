@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """PreToolUse guard for the Boomi naming conventions of the boomi-conventions plugin.
 
-Denies a tool call that would introduce, in a Boomi component XML:
+Runs only in a Boomi workspace (see session_context.is_boomi_workspace) and only on Boomi component XML
+files (a <bns:Component> element); every other file is left alone. Denies a tool call that would introduce,
+in a Boomi component XML:
   - a dynamic process / document property named DPP_* / DDP_* (convention: PP_* / D_*);
   - a passthrough-start process (subprocess) whose name does not start with "[S] " or "[UT] ".
 
-Only names *introduced* by the call are checked: names already present in the file on disk are
-left alone, so pulled components keep working. Names listed in .boomi-naming-allow (one per line,
-in the project directory) are always accepted.
+Only names *introduced* by the call are checked: names already present in the file on disk, or in
+any other component XML of the workspace (active-development/), are left alone, so pulled components
+and the components that read or set their properties keep working. Names listed in .boomi-naming-allow
+(one per line, in the project directory) are always accepted.
 
 Reads the hook JSON from stdin; prints a deny decision as JSON on stdout, nothing otherwise.
 """
@@ -17,11 +20,14 @@ import re
 import shlex
 import sys
 
+from session_context import is_boomi_workspace
+
 PROPERTY_RE = re.compile(r"\b(DPP|DDP)_[A-Za-z0-9_]+")
 COMPONENT_RE = re.compile(r"<(?:bns:)?Component\b[^>]*>", re.S)
 ATTR_RE = r'\b{}="([^"]*)"'
 CREATE_SCRIPTS = ("boomi-component-create.sh",)
 ALLOW_FILE = ".boomi-naming-allow"
+WORKSPACE_DIR = "active-development"
 FIX = {"DPP": "PP", "DDP": "D"}
 
 
@@ -42,6 +48,18 @@ def property_names(text):
     return {m.group(0) for m in PROPERTY_RE.finditer(text)}
 
 
+def workspace_property_names(cwd, skip):
+    """DPP_/DDP_ names already used by the component XMLs of the workspace, except the file `skip`."""
+    names = set()
+    root = os.path.join(cwd or ".", WORKSPACE_DIR)
+    for dirpath, _, files in os.walk(root):
+        for f in files:
+            path = os.path.join(dirpath, f)
+            if f.endswith(".xml") and os.path.abspath(path) != os.path.abspath(skip):
+                names |= property_names(read_text(path))
+    return names
+
+
 def component_attr(text, name):
     m = COMPONENT_RE.search(text)
     if not m:
@@ -54,10 +72,19 @@ def is_subprocess(text):
     return component_attr(text, "type") == "process" and "<passthroughaction" in text
 
 
-def problems(new_text, old_text, allow):
-    """Return the list of violations introduced by new_text compared with old_text."""
+def is_component(text):
+    return COMPONENT_RE.search(text) is not None
+
+
+def problems(new_text, old_text, allow, existing=lambda: set()):
+    """Return the list of violations introduced by new_text compared with old_text.
+
+    existing() gives the names already used elsewhere in the workspace (called only when needed)."""
     found = []
-    for name in sorted(property_names(new_text) - property_names(old_text) - allow):
+    new_props = property_names(new_text) - property_names(old_text) - allow
+    if new_props:
+        new_props -= existing()
+    for name in sorted(new_props):
         prefix, rest = name.split("_", 1)
         found.append(f"property {name}: use {FIX[prefix]}_{rest}")
     name = component_attr(new_text, "name")
@@ -104,15 +131,22 @@ def main():
     except ValueError:
         return 0
     cwd = data.get("cwd") or os.getcwd()
+    if not is_boomi_workspace(cwd):
+        return 0
     allow = allowed_names(cwd)
     issues = []
     for path, new, old in candidate_texts(data.get("tool_name", ""), data.get("tool_input") or {}, cwd):
-        issues += [f"{os.path.basename(path)}: {p}" for p in problems(new, old, allow)]
+        if not is_component(new):
+            continue
+        existing = lambda p=path: workspace_property_names(cwd, p)
+        issues += [f"{os.path.basename(path)}: {p}" for p in problems(new, old, allow, existing)]
     if issues:
         reason = ("Boomi naming conventions (skill boomi-coding-conventions, they override the DPP_/DDP_ "
                   "names of the Boomi Companion examples):\n- " + "\n- ".join(issues) +
-                  "\nRename every occurrence (set and read) and retry. Only if the user explicitly asks to "
-                  f"keep a name, add it to {ALLOW_FILE} in the project directory.")
+                  "\nRename every occurrence (set and read) and retry. A name fixed outside the workspace "
+                  "(set or read by a process that is not here, agreed with another team, read by a library) "
+                  f"must not be renamed: add it to {ALLOW_FILE} in the project directory, retry, and tell the "
+                  "user which names you added.")
         json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                           "permissionDecision": "deny",
                                           "permissionDecisionReason": reason}}, sys.stdout)
