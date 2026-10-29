@@ -1,7 +1,7 @@
 {
   "name": "boomi-unit-testing",
   "description": "Unit testing Boomi processes inside Boomi: a strategy skill ([UT] test processes, unchanged process under test, test environment, cleanup) and one skill per mocked connector (database operations with mockjdbc)",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "author": {
     "name": "Simone Avogadro"
   },
