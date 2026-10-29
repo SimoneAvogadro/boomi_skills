@@ -1,7 +1,8 @@
 # mockjdbc reference for Boomi tests
 
-Source: https://github.com/SimoneAvogadro/mockjdbc (README, TUTORIAL.md, FEATURES.md sections 3 and 11). Written for
-mockjdbc 2.2.x; check the CHANGELOG of the repository when a newer version is installed.
+Source: https://github.com/SimoneAvogadro/mockjdbc (README, TUTORIAL.md, FEATURES.md sections 3, 11 and 12). Written for
+mockjdbc 2.2.x; the section "Errors (fault injection)" needs the release after 2.2.0 (beta jars from
+`mockjdbc-2.2.0-b17`). Check the CHANGELOG of the repository when a newer version is installed.
 
 ## Contents
 - Installation on the runtime
@@ -10,6 +11,7 @@ mockjdbc 2.2.x; check the CHANGELOG of the repository when a newer version is in
 - CSV format
 - Database V2 connector
 - Connector behaviour under the mock
+- Errors (fault injection)
 - Extension declarations
 - Counters and several scenarios
 - Scripts
@@ -159,8 +161,8 @@ connector changes.
   payload `{"errorCode": <int>, "errorMessage": "<msg>"}`. With `returnApplicationErrors="true"` on the operation
   (the default the Companion writes) it is a normal output document of the connector shape; otherwise the document
   fails (a Try/Catch catches it). An error outside the per-document loop (connection, metadata) fails all documents.
-  The errors a test can cause are the connector's own (error 405 for the IN clause option) and those driven by the
-  data; mockjdbc 2.2.0 cannot inject an `SQLException`.
+  A test can cause the connector's own errors (error 405 for the IN clause option), those driven by the data, and an
+  `SQLException` of its choice with an error resource (next section).
 - **Response fields**: `"Rows Effected"` (Standard/Dynamic Update, Delete, Upsert) is 1 for a recognised table, 0 when
   the target is not recognised; a step resource `mockjdbc_##stepN` = `0` gives 0. `"Inserted Id"` (inserts) is always
   `[]` (no generated keys). The connector never branches on 0 rows: this matters only when the `[S]` maps or decides
@@ -185,6 +187,89 @@ connector changes.
 ### Dynamic Process Properties
 
 No documented size limit: the values live in memory, so very large mocks are bounded by the runtime memory.
+
+## Errors (fault injection)
+
+From the release after 2.2.0 (beta jars from `mockjdbc-2.2.0-b17`); a jar without it reads the resource below as plain
+data: nothing is thrown. Full documentation:
+https://github.com/SimoneAvogadro/mockjdbc/blob/master/FEATURES.md#12-simulating-errors-sqlexception.
+
+An **error resource** is an ordinary mock (in memory, Dynamic Process Property, file, `/tables/`, any lookup name) whose
+header **starts with the simple name of a `java.sql` exception**, compared without case and trimmed. The first column
+is the message; the other columns can only be `SQLState` and `ErrorCode`. The first data row gives the values (later
+rows are ignored):
+
+```
+SQLException,SQLState,ErrorCode
+Deadlock victim,40001,1205
+```
+
+- **Classes** (`SQLException` or its subclass, built with message, SQLState and error code): `SQLException`,
+  `SQLNonTransientException`, `SQLDataException`, `SQLFeatureNotSupportedException`,
+  `SQLIntegrityConstraintViolationException`, `SQLInvalidAuthorizationSpecException`,
+  `SQLNonTransientConnectionException`, `SQLSyntaxErrorException`, `SQLTransientException`, `SQLTimeoutException`,
+  `SQLTransactionRollbackException`, `SQLTransientConnectionException`, `SQLRecoverableException`. The class written is
+  the class thrown, never deduced from the SQLState. Not declarable: `SQLWarning`, `DataTruncation`,
+  `SQLClientInfoException`, vendor classes; `BatchUpdateException` is automatic (batch, below).
+- **Values**: an empty `SQLState` is null, an empty `ErrorCode` is 0. No data row, or an empty message: the message
+  is `Error injected by mockjdbc for '<name>'`, with the counted name (`orders#2`) or the step (`##step3`).
+- **Invalid resource**: another column than `SQLState` and `ErrorCode`, or a non-integer `ErrorCode`: the statement
+  throws an `SQLException` that names the resource and the problem.
+- **Where it fires**: when a statement runs (`executeQuery`, `execute`, `executeUpdate`, `executeBatch`, procedure
+  calls), never at prepare time or in metadata calls. A plain `Statement` fails only in `executeQuery`.
+- **Which statement**: the keys of the lookup above (`name?params#n` → `name?params` → `name#n` → `name`, a
+  QUERY_ID, a table, a procedure, a step). Writes now look up their name too, but only an error resource matters on a
+  write: data resources stay ignored there.
+
+**Side effects** of an injected error:
+
+- The `#n` counter advances as for a successful statement (`#1` the error, `#2` the data of a retry).
+- The parameters are captured **before** the throw, as for a good write: `mockjdbc_<name>_params`, `_params#n`: they
+  are what the process tried to write. SELECTs and steps follow the usual rules.
+- `mockjdbc_<name>_error` and, when counted, `mockjdbc_<name>_error#n` hold the message (named like `_params`: also
+  `_ERROR` as written; assert on lower case). Check it first: it proves the injection fired, and a Database V2 error
+  document that the process ignores looks the same as a misspelled resource name.
+- **Batch**: the first failing row stops the batch with a `BatchUpdateException` (message, SQLState, error code of the
+  resource) whose update counts are those of the rows before it. Later rows are neither run nor captured, and the
+  batch is cleared.
+
+**Database V2 header rule**: the connector reads the table header (`getColumns`) from the plain `mockjdbc_<table>`,
+and metadata calls ignore error resources as if they were absent. So with Database V2 the plain name keeps the
+header (CSV with types, no rows) and the error goes on `mockjdbc_<table>#n` or `mockjdbc_<table>?params`. A QUERY_ID
+name is not read by the metadata and can hold the error. An error on the plain table name leaves the connector without
+a header (NullPointerException).
+
+**A lost connection** is an error resource with a connection class and a SQLState that starts with `08`:
+
+```
+SQLNonTransientConnectionException,SQLState,ErrorCode
+Communications link failure,08S01,0
+```
+
+mockjdbc gives `08` no meaning and keeps no broken-connection state: put the resource on the first step that must
+fail and on every later step that must fail too. There is no connect-time failure. With Database V2 and
+`returnApplicationErrors="true"` the error is an output document, so the Try/Catch for "database down" stays a coverage
+gap (SKILL.md, "Failure paths").
+
+**Example**: the INSERT into `customers` fails with a duplicate key. Arrange, in the `[UT]`:
+
+```
+Message "Customers header" (Database V2 only): id|integer,name
+  → Set Properties mockjdbc_customers = Current Data
+Message "Duplicate customer":
+    SQLIntegrityConstraintViolationException,SQLState,ErrorCode
+    Duplicate entry ''C-1'' for key ''PRIMARY'',23000,1062
+  → Set Properties mockjdbc_customers#1 = Current Data
+```
+
+A Message shape uses the single quote as its escape character: a literal apostrophe is written `''`, so the message
+is `Duplicate entry 'C-1' for key 'PRIMARY'`. A message with a comma goes between CSV double quotes. Assert (path 3):
+
+- `mockjdbc_customers_error#1` equals the message (the injection fired);
+- `mockjdbc_customers_params` holds what the `[S]` tried to write;
+- Legacy: the Process Call is inside a Try/Catch and `PP_CAUGHT_MESSAGE` matches `*Duplicate entry*`;
+- Database V2 with `returnApplicationErrors="true"`: the error document has `errorCode` 1062 and the message, or the
+  `[S]` takes the error route it has for it.
 
 ## Extension declarations
 
@@ -251,7 +336,7 @@ Inside Boomi the driver is not registered in `DriverManager`: from a script use
 | Real database contacted / connection error | extensions not applied: field not extensible, Legacy override without `xpath`, Test Extensions not filled, wrong environment |
 | `ClassNotFoundException` for the driver | Custom Library not deployed on that runtime, or `aspectjrt` / `opencsv` missing |
 | Old behaviour after an upgrade | old jar still loaded (jar locking): ask the user; local Atom: stop, delete old jars, start; cloud runtime: cannot be restarted nor its jars deleted (SKILL.md, "The library is not what the runtime runs") |
-| NullPointerException in Database V2 | table header missing |
+| NullPointerException in Database V2 | table header missing, also when the plain `mockjdbc_<table>` holds an error resource (metadata ignores it): header there, error on `#n` or `?params` |
 | Database V2 `_params` missing a field, no error | input field not in the header: Standard Insert/Update/Delete do not bind it, Dynamic Insert leaves it out |
 | Database V2 "Keys Provided in Input Request is not matching the Request Profile" | Standard Get with an input field not in the header |
 | Database V2 "isValid() returned false" | pooling on, no validation query: extend `enablePooling` = `false` or `validationQuery` = `SELECT 1` |
@@ -260,3 +345,6 @@ Inside Boomi the driver is not registered in `DriverManager`: from a script use
 | `SQLException: Invalid QUERY_ID` | ID with spaces, `?`, `#` or `,`, or empty: one word, e.g. `ecommerce.orders-ws.insert-order` |
 | `-- QUERY_ID:` ignored | not on the first line |
 | `UnsupportedOperationException` | JDBC method not implemented by mockjdbc: report it on the repository |
+| The statement does not fail, `mockjdbc_<name>_error` empty | jar without error resources (or the old jar still loaded, see jar locking); the header does not start with the class name (typo, `;` separator); the key is not the one the statement resolves to (a QUERY_ID in the SQL, a wrong occurrence `#n`) |
+| `SQLException` naming an error resource | invalid error resource: a column other than `SQLState` and `ErrorCode`, or an `ErrorCode` that is not an integer |
+| Database V2 error, nothing caught by the Try/Catch | `returnApplicationErrors="true"`: the error is a normal output document (`errorCode`, `errorMessage`) |

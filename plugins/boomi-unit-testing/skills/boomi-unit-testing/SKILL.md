@@ -255,7 +255,8 @@ Level 2: build and run until the set of tests is complete. Iterate:
    - **application failures**: every Exception the `[S]` raises on purpose (validation, "Order not paid", not found
      handled as an error);
    - **technical failures**: every error the `[S]` handles from a connector (Try/Catch around a connector step, error
-     routes), for example an `SQLException` or a connection error.
+     routes), for example an `SQLException` or a connection error (a lost connection: an `SQLException` with SQLState
+     `08` on the steps that fail, see the database skill).
 
    Each failure is a `[UT]` as in "A scenario where the `[S]` must fail". A technical failure that the connector skill
    gives no deterministic way to cause is a **coverage gap**: list it in the final answer, do not invent a mechanism.
