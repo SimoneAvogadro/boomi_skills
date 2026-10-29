@@ -128,7 +128,8 @@ depends on the kind of failure:
   Properties error). In a multi-document `[S]` one failing document also loses the later-path writes of the good ones
   (seen: one failed reminder INSERT skipped the reminder-count UPDATE of all 3 invoices);
 - an error that is an **output document** (Database V2 with `returnApplicationErrors="true"`) lets the later paths
-  run: the second write runs although the first failed.
+  run: the second write runs although the first failed (observed with 2.3.0-b2: after a failed insert, the update in
+  the next path and the response still ran).
 
 Fail the first write with an error resource (below) and check the second: with Legacy its `_params` stays empty (also
 for the good documents), with Database V2 error documents it is captured. A `[UT]` that stays red for what the spec says
@@ -162,7 +163,8 @@ connector returns and an example: [mockjdbc-reference.md](mockjdbc-reference.md#
   is `#2`; an error on `#1` and none on `#2` is a retry that succeeds); the bound values (`mockjdbc_customers?c42`),
   also on a write. **With Database V2 never the plain table name** (`mockjdbc_orders`): the connector reads the
   columns of the table there and metadata ignores error resources, so the plain name keeps the header and the error
-  goes on `#n`, `?params` or a QUERY_ID. The same for the signature of a Database V2 *Stored Procedure*
+  goes on `#n` or `?params` (a QUERY_ID name should work too, since the metadata is read by table: not yet verified
+  on a run). The same for the signature of a Database V2 *Stored Procedure*
   (see "Stored procedures").
 - **What it leaves behind**: `mockjdbc_<name>_params` (and `#n`) is captured before the throw, as for a good write:
   it says what the `[S]` **tried** to write. `mockjdbc_<name>_error` (and `_error#n` when counted; lower case, named
@@ -202,9 +204,10 @@ What a database error does depends on the connector, so the `[UT]` checks a diff
   `{"errorCode": <int>, "errorMessage": "<msg>"}`. With `returnApplicationErrors="true"` on the operation (the
   Companion's default) it is a **normal output document** of the connector, not an Exception: the `[UT]` checks the
   error document the `[S]` receives or routes (or the error path it takes), not only a caught Exception. Observed
-  with 2.3.0-b1: `errorMessage` is the message of the resource, but a write loses its single quotes, so check it with
-  a wildcard on a distinctive part without apostrophes (`*Duplicate entry*`); `errorCode` is the declared `ErrorCode`
-  for a write and always 405 for a Standard Get, so check it **only for writes**. With `false` the document fails (a
+  with 2.3.0-b1 on a Standard Get and on inserts (an Update or a Delete error was not run yet):
+  `errorMessage` is the message of the resource, but an insert loses its single quotes, so check it with a wildcard
+  on a distinctive part without apostrophes (`*Duplicate entry*`); `errorCode` is the declared `ErrorCode` for an
+  insert and always 405 for a Standard Get, so check it **only for inserts**. With `false` the document fails (a
   Try/Catch catches it). An error outside the per-document loop (connection, metadata) fails all documents. Besides
   error resources, a test can cause the connector's own errors (error 405 for the IN clause option) and those driven
   by the data.
@@ -427,7 +430,7 @@ date formats, Database V2 rules and troubleshooting: [mockjdbc-reference.md](moc
 | Database V2 *Stored Procedure* that returns rows, IN values asserted on `_params` | always empty: without a signature the connector calls it with no parameters | assert the rows and their use; with OUT parameters, a signature named after the profile fields |
 | Database V2 insert into a table without mock header | NullPointerException in the connector | define `mockjdbc_orders` with the header (types included) |
 | Database V2 input field missing from the mock header | Standard Insert/Update/Delete do not bind it, Dynamic Insert leaves it out: `_params` lacks it, no error; Standard Get throws "Keys Provided ... not matching" | every field of the input document in the header, with its `\|type` |
-| Database V2 failure `[UT]` that only expects an Exception | with `returnApplicationErrors="true"` the error is a normal output document: "none raised" | check the error document the `[S]` receives or routes (`errorMessage` with a wildcard; `errorCode` only for writes), and `mockjdbc_<name>_error` to prove the injection fired |
+| Database V2 failure `[UT]` that only expects an Exception | with `returnApplicationErrors="true"` the error is a normal output document: "none raised" | check the error document the `[S]` receives or routes (`errorMessage` with a wildcard; `errorCode` only for inserts), and `mockjdbc_<name>_error` to prove the injection fired |
 | Database V2 error resource on the plain table name (`mockjdbc_orders`) or procedure name | metadata ignores it and finds no header or signature: NullPointerException, or the named binding fails before the call | header or signature in the plain name, error on `#n`, `?params` or a QUERY_ID |
 | Write failure `[UT]` on a Legacy `[S]` that expects the later Branch paths to run | Boomi skips every later path of the Branch for all documents: their writes are not captured, also those of the good documents | check their `_params` empty; with Database V2 error documents the later paths run |
 | Lost connection simulated on one step only | the later steps (a compensation, a log write) succeed: nothing like a lost connection | an error resource of class `SQLNonTransientConnectionException`, SQLState `08...`, on every later step that must fail |

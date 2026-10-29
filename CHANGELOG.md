@@ -18,9 +18,9 @@ Each plugin has its own version (in its `.claude-plugin/plugin.json`) and its ow
   Coverage gap stated: a Try/Catch for "database down" around a step with `returnApplicationErrors="true"` cannot be
   reached (observed on an Atom with 2.3.0-b1: the error never reaches a Try/Catch, also with SQLState `08`).
 - What the `[UT]` checks, from runs with 2.3.0-b1: a Database V2 error document on `errorMessage` (single quotes are
-  removed from a write's message) and on `errorCode` only for writes (a Standard Get answers 405); the Legacy Try/Catch
-  message with a wildcard on a distinctive part (a Get adds a prefix); a `[S]` with its own Try/Catch is checked on what
-  it returns, routes or logs.
+  removed from an insert's message) and on `errorCode` only for inserts (a Standard Get answers 405; Update and Delete
+  errors not observed yet); the Legacy Try/Catch message with a wildcard on a distinctive part (a Get adds a prefix); a
+  `[S]` with its own Try/Catch is checked on what it returns, routes or logs.
 - Order of the writes: a failed first write is checked with an error resource. Observed: a document error (Legacy, a
   Set Properties error) in a Branch path skips every later path of that Branch for all documents, so in a
   multi-document `[S]` the good documents lose their later-path writes; with Database V2 error documents the later paths

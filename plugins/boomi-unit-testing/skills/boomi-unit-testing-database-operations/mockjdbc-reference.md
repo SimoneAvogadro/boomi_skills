@@ -157,8 +157,9 @@ connector changes.
 
 ### Database V2
 
-- **Errors**: an `SQLException` on one document becomes `APPLICATION_ERROR`, status code = the SQL error code (for an
-  injected error on a Get see "Errors (fault injection)"), payload `{"errorCode": <int>, "errorMessage": "<msg>"}`.
+- **Errors**: an `SQLException` on one document becomes `APPLICATION_ERROR`, payload
+  `{"errorCode": <int>, "errorMessage": "<msg>"}`. Observed with injected errors: `errorCode` is the SQL error code on
+  an insert, but always 405 on a Standard Get (see "Errors (fault injection)").
   With `returnApplicationErrors="true"` on the operation (the default the Companion writes) it is a normal output
   document of the connector shape; otherwise the document fails (a Try/Catch catches it). An error outside the
   per-document loop (connection, metadata) fails all documents.
@@ -237,7 +238,8 @@ Deadlock victim,40001,1205
 **Database V2 header rule** (tables and procedures): the connector reads the table header (`getColumns`) from the
 plain `mockjdbc_<table>`, and metadata calls ignore error resources as if they were absent. So with Database V2 the
 plain name keeps the header (CSV with types, no rows) and the error goes on `mockjdbc_<table>#n` or
-`mockjdbc_<table>?params`. A QUERY_ID name is not read by the metadata and can hold the error. An error on the plain
+`mockjdbc_<table>?params`. A QUERY_ID name should hold the error too, since the metadata is read by table (not yet
+verified on a run). An error on the plain
 table name leaves the connector without a header (NullPointerException). The same for a Database V2 *Stored
 Procedure*: the signature stays in the plain `mockjdbc_<procedure>` (read with `getProcedureColumns`, to bind the
 parameters by name) and the error goes on `mockjdbc_<procedure>#n` or `?params`; an error on the plain name makes the
@@ -272,15 +274,17 @@ is `Duplicate entry 'C-1' for key 'PRIMARY'`. A message with a comma goes betwee
 - `mockjdbc_customers_error#1` equals the message (the injection fired);
 - `mockjdbc_customers_params` holds what the `[S]` tried to write;
 - Legacy: the Process Call is inside a Try/Catch and `PP_CAUGHT_MESSAGE` matches `*Duplicate entry*`;
-- Database V2 with `returnApplicationErrors="true"`: the error document has `errorCode` 1062 (a write) and an
+- Database V2 with `returnApplicationErrors="true"`: the error document has `errorCode` 1062 (an insert) and an
   `errorMessage` that matches `*Duplicate entry*`, or the `[S]` takes the error route it has for it.
 
-**How the error reaches the process** (observed on a Boomi Atom with 2.3.0-b1; the checks above follow from it):
+**How the error reaches the process** (observed on a Boomi Atom with 2.3.0-b1 and b2; the checks above follow from
+it). The Database V2 column was seen on a Standard Get and on inserts (Standard and Dynamic Insert); an error on an
+Update or a Delete was not run yet, so do not assume its `errorCode` or quotes:
 
 | | Legacy | Database V2 with `returnApplicationErrors="true"` |
 |---|---|---|
 | Get | the whole call fails; Try/Catch message `Errors occurred while building or executing SQL statement: <message>; Caused by: <message>` | output document `{"errorCode":405,"errorMessage":"<message>"}`: `errorCode` is 405 whatever the declared `ErrorCode` or class; the message is as declared, quotes included |
-| Write (Send, Insert) | only that document fails; Try/Catch message is the bare message | output document `{"errorCode":<declared ErrorCode>,"errorMessage":"<message>"}`: the code is the declared one; single quotes are removed from the message |
+| Write (Legacy Send; Database V2 insert) | only that document fails; Try/Catch message is the bare message | output document `{"errorCode":<declared ErrorCode>,"errorMessage":"<message>"}`: the code is the declared one; single quotes are removed from the message |
 
 - Database V2, both: the document property `meta.base.applicationstatusmessage` holds the message with its quotes.
   `meta.base.applicationstatuscode` is the declared code on an Insert, but was 1062 on every Get error: do not rely
@@ -288,8 +292,9 @@ is `Duplicate entry 'C-1' for key 'PRIMARY'`. A message with a comma goes betwee
 - With `returnApplicationErrors="true"` the error never reaches a Try/Catch, also with SQLState `08`.
 - A document error (seen with Legacy Send errors and with a Set Properties profile error) in a Branch path makes Boomi
   skip every later path of that Branch, for all documents, with or without a Try/Catch in the caller. A Database V2
-  error document is an output document: the later paths run.
-- So check a Database V2 error document on `errorMessage` (and on `errorCode` only for writes), and any message with a
+  error document is an output document: the later paths run (observed: after a failed insert, the update in the next
+  path and the response still ran).
+- So check a Database V2 error document on `errorMessage` (and on `errorCode` only for inserts), and any message with a
   wildcard on a distinctive part without apostrophes (`*Duplicate entry*`).
 
 ## Extension declarations
