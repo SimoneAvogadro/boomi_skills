@@ -1,8 +1,8 @@
 # mockjdbc reference for Boomi tests
 
 Source: https://github.com/SimoneAvogadro/mockjdbc (README, TUTORIAL.md, FEATURES.md sections 3, 11 and 12). Written for
-mockjdbc 2.2.x; the section "Errors (fault injection)" needs the release after 2.2.0 (beta jars from
-`mockjdbc-2.2.0-b17`). Check the CHANGELOG of the repository when a newer version is installed.
+mockjdbc 2.2.x; the section "Errors (fault injection)" needs mockjdbc 2.3.0 (beta jars from `2.3.0-b1`). Check the
+CHANGELOG of the repository when a newer version is installed.
 
 ## Contents
 - Installation on the runtime
@@ -157,10 +157,11 @@ connector changes.
 
 ### Database V2
 
-- **Errors**: an `SQLException` on one document becomes `APPLICATION_ERROR`, status code = the SQL error code,
-  payload `{"errorCode": <int>, "errorMessage": "<msg>"}`. With `returnApplicationErrors="true"` on the operation
-  (the default the Companion writes) it is a normal output document of the connector shape; otherwise the document
-  fails (a Try/Catch catches it). An error outside the per-document loop (connection, metadata) fails all documents.
+- **Errors**: an `SQLException` on one document becomes `APPLICATION_ERROR`, status code = the SQL error code (for an
+  injected error on a Get see "Errors (fault injection)"), payload `{"errorCode": <int>, "errorMessage": "<msg>"}`.
+  With `returnApplicationErrors="true"` on the operation (the default the Companion writes) it is a normal output
+  document of the connector shape; otherwise the document fails (a Try/Catch catches it). An error outside the
+  per-document loop (connection, metadata) fails all documents.
   A test can cause the connector's own errors (error 405 for the IN clause option), those driven by the data, and an
   `SQLException` of its choice with an error resource (next section).
 - **Response fields**: `"Rows Effected"` (Standard/Dynamic Update, Delete, Upsert) is 1 for a recognised table, 0 when
@@ -190,8 +191,8 @@ No documented size limit: the values live in memory, so very large mocks are bou
 
 ## Errors (fault injection)
 
-From the release after 2.2.0 (beta jars from `mockjdbc-2.2.0-b17`); a jar without it reads the resource below as plain
-data: nothing is thrown. Full documentation:
+From mockjdbc 2.3.0 (beta jars from `2.3.0-b1`); an older jar reads the resource below as plain data: nothing is
+thrown. Full documentation:
 https://github.com/SimoneAvogadro/mockjdbc/blob/master/FEATURES.md#12-simulating-errors-sqlexception.
 
 An **error resource** is an ordinary mock (in memory, Dynamic Process Property, file, `/tables/`, any lookup name) whose
@@ -212,14 +213,14 @@ Deadlock victim,40001,1205
   the class thrown, never deduced from the SQLState. Not declarable: `SQLWarning`, `DataTruncation`,
   `SQLClientInfoException`, vendor classes; `BatchUpdateException` is automatic (batch, below).
 - **Values**: an empty `SQLState` is null, an empty `ErrorCode` is 0. No data row, or an empty message: the message
-  is `Error injected by mockjdbc for '<name>'`, with the counted name (`orders#2`) or the step (`##step3`).
+  is `Error injected by mockjdbc for '<name>'`, with the counted name (`orders#2`) or the step (`##STEP3`).
 - **Invalid resource**: another column than `SQLState` and `ErrorCode`, or a non-integer `ErrorCode`: the statement
   throws an `SQLException` that names the resource and the problem.
 - **Where it fires**: when a statement runs (`executeQuery`, `execute`, `executeUpdate`, `executeBatch`, procedure
   calls), never at prepare time or in metadata calls. A plain `Statement` fails only in `executeQuery`.
 - **Which statement**: the keys of the lookup above (`name?params#n` → `name?params` → `name#n` → `name`, a
-  QUERY_ID, a table, a procedure, a step). Writes now look up their name too, but only an error resource matters on a
-  write: data resources stay ignored there.
+  QUERY_ID, a table, a procedure, a step). From 2.3.0 writes look up their name too, but only an error resource matters
+  on a write: data resources stay ignored there.
 
 **Side effects** of an injected error:
 
@@ -233,11 +234,14 @@ Deadlock victim,40001,1205
   resource) whose update counts are those of the rows before it. Later rows are neither run nor captured, and the
   batch is cleared.
 
-**Database V2 header rule**: the connector reads the table header (`getColumns`) from the plain `mockjdbc_<table>`,
-and metadata calls ignore error resources as if they were absent. So with Database V2 the plain name keeps the
-header (CSV with types, no rows) and the error goes on `mockjdbc_<table>#n` or `mockjdbc_<table>?params`. A QUERY_ID
-name is not read by the metadata and can hold the error. An error on the plain table name leaves the connector without
-a header (NullPointerException).
+**Database V2 header rule** (tables and procedures): the connector reads the table header (`getColumns`) from the
+plain `mockjdbc_<table>`, and metadata calls ignore error resources as if they were absent. So with Database V2 the
+plain name keeps the header (CSV with types, no rows) and the error goes on `mockjdbc_<table>#n` or
+`mockjdbc_<table>?params`. A QUERY_ID name is not read by the metadata and can hold the error. An error on the plain
+table name leaves the connector without a header (NullPointerException). The same for a Database V2 *Stored
+Procedure*: the signature stays in the plain `mockjdbc_<procedure>` (read with `getProcedureColumns`, to bind the
+parameters by name) and the error goes on `mockjdbc_<procedure>#n` or `?params`; an error on the plain name makes the
+named binding fail before the call.
 
 **A lost connection** is an error resource with a connection class and a SQLState that starts with `08`:
 
@@ -268,8 +272,22 @@ is `Duplicate entry 'C-1' for key 'PRIMARY'`. A message with a comma goes betwee
 - `mockjdbc_customers_error#1` equals the message (the injection fired);
 - `mockjdbc_customers_params` holds what the `[S]` tried to write;
 - Legacy: the Process Call is inside a Try/Catch and `PP_CAUGHT_MESSAGE` matches `*Duplicate entry*`;
-- Database V2 with `returnApplicationErrors="true"`: the error document has `errorCode` 1062 and the message, or the
-  `[S]` takes the error route it has for it.
+- Database V2 with `returnApplicationErrors="true"`: the error document has `errorCode` 1062 (a write) and an
+  `errorMessage` that matches `*Duplicate entry*`, or the `[S]` takes the error route it has for it.
+
+**How the error reaches the process** (observed on a Boomi Atom with 2.3.0-b1; the checks above follow from it):
+
+| | Legacy | Database V2 with `returnApplicationErrors="true"` |
+|---|---|---|
+| Get | the whole call fails; Try/Catch message `Errors occurred while building or executing SQL statement: <message>; Caused by: <message>` | output document `{"errorCode":405,"errorMessage":"<message>"}`: `errorCode` is 405 whatever the declared `ErrorCode` or class; the message is as declared, quotes included |
+| Write (Send, Insert) | only that document fails; Try/Catch message is the bare message | output document `{"errorCode":<declared ErrorCode>,"errorMessage":"<message>"}`: the code is the declared one; single quotes are removed from the message |
+
+- Database V2, both: the document property `meta.base.applicationstatusmessage` holds the message with its quotes.
+  `meta.base.applicationstatuscode` is the declared code on an Insert, but was 1062 on every Get error: do not rely
+  on it for a Get.
+- With `returnApplicationErrors="true"` the error never reaches a Try/Catch, also with SQLState `08`.
+- So check a Database V2 error document on `errorMessage` (and on `errorCode` only for writes), and any message with a
+  wildcard on a distinctive part without apostrophes (`*Duplicate entry*`).
 
 ## Extension declarations
 
@@ -336,7 +354,7 @@ Inside Boomi the driver is not registered in `DriverManager`: from a script use
 | Real database contacted / connection error | extensions not applied: field not extensible, Legacy override without `xpath`, Test Extensions not filled, wrong environment |
 | `ClassNotFoundException` for the driver | Custom Library not deployed on that runtime, or `aspectjrt` / `opencsv` missing |
 | Old behaviour after an upgrade | old jar still loaded (jar locking): ask the user; local Atom: stop, delete old jars, start; cloud runtime: cannot be restarted nor its jars deleted (SKILL.md, "The library is not what the runtime runs") |
-| NullPointerException in Database V2 | table header missing, also when the plain `mockjdbc_<table>` holds an error resource (metadata ignores it): header there, error on `#n` or `?params` |
+| NullPointerException in Database V2 | table header missing, also when the plain `mockjdbc_<table>` holds an error resource (metadata ignores it): header there, error on `#n` or `?params`. A procedure signature in the same case: the named binding fails before the call |
 | Database V2 `_params` missing a field, no error | input field not in the header: Standard Insert/Update/Delete do not bind it, Dynamic Insert leaves it out |
 | Database V2 "Keys Provided in Input Request is not matching the Request Profile" | Standard Get with an input field not in the header |
 | Database V2 "isValid() returned false" | pooling on, no validation query: extend `enablePooling` = `false` or `validationQuery` = `SELECT 1` |
@@ -347,4 +365,5 @@ Inside Boomi the driver is not registered in `DriverManager`: from a script use
 | `UnsupportedOperationException` | JDBC method not implemented by mockjdbc: report it on the repository |
 | The statement does not fail, `mockjdbc_<name>_error` empty | jar without error resources (or the old jar still loaded, see jar locking); the header does not start with the class name (typo, `;` separator); the key is not the one the statement resolves to (a QUERY_ID in the SQL, a wrong occurrence `#n`) |
 | `SQLException` naming an error resource | invalid error resource: a column other than `SQLState` and `ErrorCode`, or an `ErrorCode` that is not an integer |
-| Database V2 error, nothing caught by the Try/Catch | `returnApplicationErrors="true"`: the error is a normal output document (`errorCode`, `errorMessage`) |
+| Database V2 error, nothing caught by the Try/Catch | `returnApplicationErrors="true"`: the error is a normal output document (`errorMessage`; `errorCode` is 405 on a Get) |
+| Message check fails on a message with apostrophes | Database V2 removes single quotes from a write's message, Legacy Get adds a prefix: wildcard on a part without apostrophes |

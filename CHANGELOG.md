@@ -8,14 +8,19 @@ Each plugin has its own version (in its `.claude-plugin/plugin.json`) and its ow
 
 ### 1.2.0 - 2026-10-29
 
-- Database operations: technical failures are caused with mockjdbc error resources (the release after 2.2.0, beta
-  jars from `mockjdbc-2.2.0-b17`): a statement fails with the `SQLException` class, SQLState and error code of a CSV,
-  chosen per QUERY_ID, per n-th use of a name or per bound values. `mockjdbc_<name>_error` proves the injection fired
-  and `_params` says what the `[S]` tried to write. With an older jar the failure paths stay a coverage gap.
+- Database operations: technical failures are caused with mockjdbc error resources (mockjdbc 2.3.0, beta jars from
+  `2.3.0-b1`): a statement fails with the `SQLException` class, SQLState and error code of a CSV, chosen per QUERY_ID,
+  per n-th use of a name or per bound values. `mockjdbc_<name>_error` proves the injection fired and `_params` says
+  what the `[S]` tried to write. With an older jar the failure paths stay a coverage gap.
 - A connection lost in the middle of the `[S]`: listed for every `[S]` with two or more database steps, caused with an
   error resource with SQLState `08` on the first failing step and on every later step that must fail.
-- Database V2: the error never goes on the plain table name (it keeps the header). Coverage gap stated: a Try/Catch
-  for "database down" around a step with `returnApplicationErrors="true"` cannot be reached.
+- Database V2: the error never goes on the plain table name or procedure name (they keep the header or the signature).
+  Coverage gap stated: a Try/Catch for "database down" around a step with `returnApplicationErrors="true"` cannot be
+  reached (observed on an Atom with 2.3.0-b1: the error never reaches a Try/Catch, also with SQLState `08`).
+- What the `[UT]` checks, from runs with 2.3.0-b1: a Database V2 error document on `errorMessage` (single quotes are
+  removed from a write's message) and on `errorCode` only for writes (a Standard Get answers 405); the Legacy Try/Catch
+  message with a wildcard on a distinctive part (a Get adds a prefix); a `[S]` with its own Try/Catch is checked on what
+  it returns, routes or logs.
 - Order of the writes: a failed first write is checked with an error resource. `mockjdbc-reference.md`: new section
   "Errors (fault injection)". Strategy skill: the lost connection named among the technical failures.
 
