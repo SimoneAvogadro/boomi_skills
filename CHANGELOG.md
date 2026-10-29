@@ -21,8 +21,11 @@ Each plugin has its own version (in its `.claude-plugin/plugin.json`) and its ow
   removed from a write's message) and on `errorCode` only for writes (a Standard Get answers 405); the Legacy Try/Catch
   message with a wildcard on a distinctive part (a Get adds a prefix); a `[S]` with its own Try/Catch is checked on what
   it returns, routes or logs.
-- Order of the writes: a failed first write is checked with an error resource. `mockjdbc-reference.md`: new section
-  "Errors (fault injection)". Strategy skill: the lost connection named among the technical failures.
+- Order of the writes: a failed first write is checked with an error resource. Observed: a document error (Legacy, a
+  Set Properties error) in a Branch path skips every later path of that Branch for all documents, so in a
+  multi-document `[S]` the good documents lose their later-path writes; with Database V2 error documents the later paths
+  run. `mockjdbc-reference.md`: new section "Errors (fault injection)". Strategy skill: the lost connection named
+  among the technical failures.
 
 ### 1.1.1 - 2026-10-25
 

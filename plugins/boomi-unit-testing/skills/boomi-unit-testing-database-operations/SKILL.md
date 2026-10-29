@@ -120,11 +120,21 @@ line and the sentence of the spec it breaks. How much this review weighs depends
 SQL validation (syntax, semantics against the real database) belongs to the DEV phase, not to the mock.
 
 Read the **order of the writes** too: when the spec puts two writes in sequence ("insert the refund, then update the
-order") and the `[S]` runs them in separate Branch paths (inside a Try/Catch, for example), the second does not
-depend on the first: it can run even when the first failed. Fail the first write with an error resource (below) and
-check that the second is not captured: when the spec makes the second write depend on the first, a `[UT]` that stays
-red is a defect. With an older jar no test sees it: a defect "found by review" when the spec makes the second write
-depend on the first, otherwise a check for DEV in the final answer.
+order") and the `[S]` runs them in separate Branch paths, what the second write does after a failure of the first
+depends on the kind of failure:
+
+- a **document error** (Legacy, or any failed document) makes Boomi skip every later path of that Branch, **for all
+  documents**, with or without a Try/Catch in the caller (observed with 2.3.0-b1, on Legacy Send errors and on a Set
+  Properties error). In a multi-document `[S]` one failing document also loses the later-path writes of the good ones
+  (seen: one failed reminder INSERT skipped the reminder-count UPDATE of all 3 invoices);
+- an error that is an **output document** (Database V2 with `returnApplicationErrors="true"`) lets the later paths
+  run: the second write runs although the first failed.
+
+Fail the first write with an error resource (below) and check the second: with Legacy its `_params` stays empty (also
+for the good documents), with Database V2 error documents it is captured. A `[UT]` that stays red for what the spec says
+is a defect: the good documents must still be processed, or the second write must depend on the first. With an older
+jar no test sees it: a defect "found by review" when the spec makes the second write depend on the first, otherwise a
+check for DEV in the final answer.
 
 **Failure paths of the database operations.** In the inventory, also list the technical failures the `[S]` handles
 around its database steps: a Try/Catch around a database step, an error route, a check of the connector's error
@@ -175,11 +185,14 @@ log, a compensation in the catch path): mockjdbc keeps no state of a broken conn
 step without its own error resource succeeds. Cover each point of loss that leaves a different set of writes done, and
 check the steps done before it (`_params`), the failing steps (`_error` is the failure, `_params` only the attempt),
 that a later step with no error resource, which the `[S]` must not reach, shows no attempt, and what the `[S]` returns.
+Expect the later Branch paths not to run with Legacy (their `_params` stay empty), and to run with Database V2 error
+documents: there the later steps that must fail carry their own error resource.
 
 What a database error does depends on the connector, so the `[UT]` checks a different outcome:
 
 - **Legacy**: an error in a write (insert, update, delete, stored procedure write) fails **only that document**,
-  after a rollback of its uncommitted rows; the other documents go on. An error in a Get fails the whole connector
+  after a rollback of its uncommitted rows; the other documents go on in that path, but the later paths of the Branch
+  do not run, for any document (see the order of the writes, above). An error in a Get fails the whole connector
   call. When the `[S]` has its own Try/Catch or error route, the `[UT]` checks what the `[S]` returns, routes or logs.
   When the error leaves the `[S]`, the `[UT]` wraps the Process Call in a Try/Catch (`boomi-unit-testing`) and checks
   the caught message with a wildcard on a distinctive part of it (`*Duplicate entry*`): observed with 2.3.0-b1, a Get
@@ -416,6 +429,7 @@ date formats, Database V2 rules and troubleshooting: [mockjdbc-reference.md](moc
 | Database V2 input field missing from the mock header | Standard Insert/Update/Delete do not bind it, Dynamic Insert leaves it out: `_params` lacks it, no error; Standard Get throws "Keys Provided ... not matching" | every field of the input document in the header, with its `\|type` |
 | Database V2 failure `[UT]` that only expects an Exception | with `returnApplicationErrors="true"` the error is a normal output document: "none raised" | check the error document the `[S]` receives or routes (`errorMessage` with a wildcard; `errorCode` only for writes), and `mockjdbc_<name>_error` to prove the injection fired |
 | Database V2 error resource on the plain table name (`mockjdbc_orders`) or procedure name | metadata ignores it and finds no header or signature: NullPointerException, or the named binding fails before the call | header or signature in the plain name, error on `#n`, `?params` or a QUERY_ID |
+| Write failure `[UT]` on a Legacy `[S]` that expects the later Branch paths to run | Boomi skips every later path of the Branch for all documents: their writes are not captured, also those of the good documents | check their `_params` empty; with Database V2 error documents the later paths run |
 | Lost connection simulated on one step only | the later steps (a compensation, a log write) succeed: nothing like a lost connection | an error resource of class `SQLNonTransientConnectionException`, SQLState `08...`, on every later step that must fail |
 | Database V2 with `returnApplicationErrors="true"`: "database down" tested through an error resource | the error document is checked, not the Try/Catch around the step | coverage gap for that Try/Catch, in the final answer |
 | Database V2 connection with pooling, only `className` and `url` extended | "isValid() returned false": no connection | extend `enablePooling` = `false` or `validationQuery` = `SELECT 1` |
@@ -428,4 +442,4 @@ date formats, Database V2 rules and troubleshooting: [mockjdbc-reference.md](moc
 | Numeric parameter expected as the spec writes it (`50`) | Decision false on `50.00`: runs spent adapting strings | expected rendering from the bound type; a different one checked numerically against the spec before adopting it |
 | Wrong N for `mockjdbc_##stepN` | a read returns no rows, or the write is not captured | confirm N with a first run (Notify on `##step0_params`, `##step1_params`...) |
 | A failure case not tested: a `[UT]` that expects an exception passes when no exception is raised | the error path of the `[S]` is never proved | Decision "exception raised?" then the expected message, as in `boomi-unit-testing`; check that no write was captured |
-| A technical database failure simulated without an error resource (a malformed CSV, a wrong name) | the `[UT]` tests nothing, or a connector error that is not an `SQLException` with a SQLState | an error resource; with a jar before 2.3.0 (beta `2.3.0-b1`), a coverage gap in the final answer |
+| A technical database failure simulated without an error resource (a malformed CSV, a wrong name) | the `[UT]` tests nothing, or a connector error that is not an `SQLException` with a SQLState | an error resource; with a jar older than `2.3.0-b1`, a coverage gap in the final answer |

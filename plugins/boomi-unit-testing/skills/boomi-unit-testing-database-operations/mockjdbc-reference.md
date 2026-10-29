@@ -286,6 +286,9 @@ is `Duplicate entry 'C-1' for key 'PRIMARY'`. A message with a comma goes betwee
   `meta.base.applicationstatuscode` is the declared code on an Insert, but was 1062 on every Get error: do not rely
   on it for a Get.
 - With `returnApplicationErrors="true"` the error never reaches a Try/Catch, also with SQLState `08`.
+- A document error (seen with Legacy Send errors and with a Set Properties profile error) in a Branch path makes Boomi
+  skip every later path of that Branch, for all documents, with or without a Try/Catch in the caller. A Database V2
+  error document is an output document: the later paths run.
 - So check a Database V2 error document on `errorMessage` (and on `errorCode` only for writes), and any message with a
   wildcard on a distinctive part without apostrophes (`*Duplicate entry*`).
 
